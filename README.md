@@ -11,6 +11,14 @@ Statistical validation of **TESS** and **Kepler** planet candidates with [TRICER
 Observer-oriented documentation: **Observer’s Guide** (PDF) + Kepler update addendum.  
 Full methods and tests: technical manual (separate PDF).
 
+**Author / contact:** *[your name and affiliation — e.g. name, institute, e-mail]*
+
+---
+
+### Nederlandse samenvatting
+
+Deze repository bevat een pipeline voor de **statistische validatie** van TESS- en Kepler-planetenkandidaten met TRICERATOPS. De pipeline bouwt lichtcurves, voert diagnostische tests uit (odd/even, secundaire eclips, ETV, difference imaging, …), berekent false-positive kansen (FPP/NFPP) en kan grondgebaseerde fotometrie (AAVSO, AstroImageJ, …) meenemen om nabije sterren uit te sluiten. Er is een grafische interface (`triceratops_gui.py`) en een audit-script voor afgeronde runs. Vanaf versie 4.2 wordt ook **Kepler** ondersteund (`--mission kepler --kic`). Zie de Observer’s Guide en het Kepler-addendum voor gebruik door waarnemers.
+
 ---
 
 ## What it does
@@ -160,6 +168,36 @@ If you use this pipeline in a publication, please cite:
 
 ---
 
-## Licence / contact
+## Licence
 
-Add your preferred licence and contact details here.
+This project is released under the **MIT License**.
+
+```
+MIT License
+
+Copyright (c) 2026 [your name]
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+Replace `[your name]` above (and in the Author line at the top) with your name or organisation. If you prefer another licence (e.g. BSD-3-Clause, Apache-2.0), say so and the text can be swapped.
+
+## Contact
+
+Questions, bug reports and contributions: open an issue on this repository, or contact the author listed at the top of this README.
