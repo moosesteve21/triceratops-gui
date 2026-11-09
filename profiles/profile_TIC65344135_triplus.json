@@ -1,0 +1,18 @@
+{
+  "gui_version": "1.0",
+  "description": "TIC 65344135 - campaign 942 with TRICERATOPS+ (triplus env; aperture depth); add the ground light curves",
+  "options": {
+    "tic": "65344135",
+    "ephemeris": [
+      "36.88",
+      "4352.3681",
+      "3200",
+      "5.33"
+    ],
+    "ephem_scan_hours": "16",
+    "dilution_mode": "none",
+    "ld_fit": true,
+    "tri_plus": "on"
+  },
+  "ground": []
+}

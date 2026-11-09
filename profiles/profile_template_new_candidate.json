@@ -1,0 +1,8 @@
+{
+  "gui_version": "1.0",
+  "description": "Template for a new candidate: fill in the TIC and the ephemeris (P, T0, depth, T14)",
+  "options": {
+    "ld_fit": true
+  },
+  "ground": []
+}

@@ -1,0 +1,19 @@
+{
+  "gui_version": "1.1",
+  "description": "TIC 100796276 = L 279-94 (M dwarf, 43.6 pc, Tmag 11.7, Dec -53) - Rabtsevich 2026: P = 18.15219 d, 0.32 %, 2.4 h, 6 transits 2020-2026; nearest suspect TIC 100795619 at 40\"",
+  "options": {
+    "tic": "100796276",
+    "ephemeris": [
+      "18.15219",
+      "2036.9763",
+      "3200",
+      "2.4"
+    ],
+    "ephem_scan_hours": "3",
+    "ld_fit": true,
+    "vet_neighbours": true,
+    "sensitivity": true,
+    "red_noise_scrambles": "2000"
+  },
+  "ground": []
+}

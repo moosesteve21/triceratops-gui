@@ -1,0 +1,16 @@
+{
+  "gui_version": "1.0",
+  "description": "TIC 229701403 planet 1 - P = 490.26 d, 7341 ppm (docx); few TESS transits",
+  "options": {
+    "tic": "229701403",
+    "outdir": "TIC229701403_b",
+    "ephemeris": [
+      "490.258914",
+      "1951.169902",
+      "7341",
+      "10.49976"
+    ],
+    "ld_fit": true
+  },
+  "ground": []
+}

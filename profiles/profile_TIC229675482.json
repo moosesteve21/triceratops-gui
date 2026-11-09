@@ -1,0 +1,17 @@
+{
+  "gui_version": "1.0",
+  "description": "TIC 229675482 - mini-Neptune candidate, P = 145.841 d, 863 ppm, T14 13.5 h (docx); shallow: grid search",
+  "options": {
+    "tic": "229675482",
+    "ephemeris": [
+      "145.841",
+      "1714.174",
+      "863",
+      "13.5"
+    ],
+    "ephem_search": "grid",
+    "ephem_scan_hours": "24",
+    "ld_fit": true
+  },
+  "ground": []
+}

@@ -1,0 +1,16 @@
+{
+  "gui_version": "1.0",
+  "description": "TIC 65344135 - AAVSO campaign 942, P = 36.88 d, neighbour at 5.9\"; triceratops 1.1 (on-target depth)",
+  "options": {
+    "tic": "65344135",
+    "ephemeris": [
+      "36.88",
+      "4352.3681",
+      "5900",
+      "5.33"
+    ],
+    "ephem_scan_hours": "16",
+    "ld_fit": true
+  },
+  "ground": []
+}

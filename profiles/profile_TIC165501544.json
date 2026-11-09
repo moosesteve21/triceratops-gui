@@ -1,0 +1,17 @@
+{
+  "gui_version": "1.0",
+  "description": "TIC 165501544 - Saturn-size candidate, P = 132.42 d, 3228 ppm (docx); shallow: grid ephemeris search",
+  "options": {
+    "tic": "165501544",
+    "ephemeris": [
+      "132.42",
+      "1767.127",
+      "3228",
+      "7.642"
+    ],
+    "ephem_search": "grid",
+    "ephem_scan_hours": "18",
+    "ld_fit": true
+  },
+  "ground": []
+}

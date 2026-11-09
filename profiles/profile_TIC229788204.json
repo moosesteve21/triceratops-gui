@@ -1,0 +1,17 @@
+{
+  "gui_version": "1.0",
+  "description": "TIC 229788204 - V-shaped grazing eclipse, P = 93.83 d (likely twin EB at 187.7 d); v4 settings",
+  "options": {
+    "tic": "229788204",
+    "ephemeris": [
+      "93.83471",
+      "1733.85618",
+      "72600",
+      "4.46"
+    ],
+    "refine_chi2_max": "20",
+    "ld_fit": true,
+    "sensitivity": true
+  },
+  "ground": []
+}

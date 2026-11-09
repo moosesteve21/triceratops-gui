@@ -1,0 +1,24 @@
+{
+  "gui_version": "1.2",
+  "description": "KIC 3755522 = KOI-5005.01 (Kepler, Rabtsevich 2026): P = 251.96 d, 198 ppm (A+B light), ~5.2 h, 4 transits Q4/Q9/Q12/Q15; companion B at 2.49\" is the probable host; star A parameters from Berger 2020 / DR25",
+  "options": {
+    "mission": "kepler",
+    "kic": "3755522",
+    "ephemeris": [
+      "251.9607",
+      "1123.2506",
+      "198",
+      "5.2"
+    ],
+    "ephem_search": "grid",
+    "ephem_scan_hours": "3",
+    "ephem_grid_dp": "0.03",
+    "lc_source": "pdcsap",
+    "ld_fit": true,
+    "vet_neighbours": true,
+    "sensitivity": true,
+    "red_noise_scrambles": "2000",
+    "star_source": "kepler"
+  },
+  "ground": []
+}
