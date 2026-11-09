@@ -1,0 +1,415 @@
+=== Statistical validation of TIC 65344135 ===
+
+Output directory:       /mnt/d/EXPLORE/candidates_dymock/TIC65344135
+TESScut cache directory: /mnt/d/EXPLORE/candidates_dymock/TIC65344135/tesscut_cache
+(existing cutouts for the same TIC/sector/size are reused)
+
+Installed triceratops has no 'dilution_corrected' argument (TRICERATOPS+ or < 1.1): --dilution-mode none is used, so TRICERATOPS receives the light curve on the aperture flux scale and does the dilution correction itself.
+
+Stellar parameters from the TIC:
+  Teff       = 5539.0
+  logg       = 4.43546
+  metal      = 0.0
+  rad        = 0.987852
+  rad_min    = 0.9348620999999999
+  rad_max    = 1.0408419
+  mass       = 0.97
+  mass_min   = 0.8517159999999999
+  mass_max   = 1.088284
+  Tmag       = 12.3302
+  ra         = 39.3071344283565
+  dec        = -26.3145921507239
+  u          = [np.float64(0.3862), np.float64(0.2061)]
+Field catalogue: 55 TIC stars within 220 arcsec (PSF model for apertures and dilution)
+
+Light-curve source: TESScut FFI cutouts
+Sectors with FFI coverage: [3, 4, 30, 97, 106, 107, 108]
+
+--- Apertures (target flux fraction g from the catalogue PSF model) ---
+  sector   3: optimal       15 px  g =  0.557  cadence  30.0 min
+  sector   4: optimal       11 px  g =  0.562  cadence  30.0 min
+  sector  30: optimal       16 px  g =  0.556  cadence  10.0 min
+  sector  97: optimal       14 px  g =  0.559  cadence   3.3 min
+  sector 106: optimal       11 px  g =  0.561  cadence   3.3 min
+  sector 107: optimal       11 px  g =  0.557  cadence   3.3 min
+  sector 108: optimal       10 px  g =  0.556  cadence   3.3 min
+
+Using the KNOWN ephemeris (no TLS search): P = 36.88 d, T0 = 4352.3681 BTJD, T14 = 5.33 h, depth = 5900 ppm  [check that this belongs to TIC 65344135]
+
+--- Ephemeris check: box search of every expected transit within +-16.0 h ---
+  epoch  -80  predicted 1401.9681  found 1402.0460  ( +1.87 h)  S/N =   13.7  box depth =    2295 ppm
+  epoch  -60  predicted 2139.5681  found 2139.6371  ( +1.66 h)  S/N =    9.8  box depth =    2247 ppm
+  epoch  -11  predicted 3946.6881  found 3946.6925  ( +0.10 h)  S/N =    6.2  box depth =    1492 ppm
+  epoch  -10  predicted 3983.5681  found 3983.5889  ( +0.50 h)  S/N =   15.2  box depth =    2750 ppm
+  epoch   -3  predicted 4241.7281  found 4241.7211  ( -0.17 h)  S/N =   13.8  box depth =    2734 ppm
+  epoch   -2  predicted 4278.6081  found 4278.7243  ( +2.79 h)  S/N =    1.0  box depth =     319 ppm
+  epoch   -1  predicted 4315.4881  found 4315.4931  ( +0.12 h)  S/N =   16.5  box depth =    2968 ppm
+  linear fit of 6 transits (epochs [-80, -60, -11, -10, -3, -1]): P = 36.878950 +/- 0.000139 d, T0 = 4352.36671 BTJD (epoch 0) = 3983.57721 (epoch -10), O-C rms = 12.3 min
+  ! the known ephemeris misses the transits by up to 1.98 h (= 0.37 T14); ADOPTING the refined ephemeris (P 36.880000 -> 36.878950 d, T0 -> 4352.36671). Use --ephem-search off to keep the input values.
+
+  shape for the per-transit fits (trapezoid on the fold): T14 = 4.79 h, depth = 2794 ppm, T0 shift = +11.5 min
+
+--- Per-transit depths (7 usable transits) ---
+  epoch  -80  Tc = 1402.05074  dTc =  +37.1 min  depth =     2691 +/-    320 ppm  snr =   8.4  (34 pts)
+  epoch  -60  Tc = 2139.62973  dTc =  +31.8 min  depth =     2210 +/-    309 ppm  snr =   7.2  (99 pts)
+  epoch  -11  Tc = 3946.69827  dTc =  +14.9 min  depth =     3596 +/-    361 ppm  snr =  10.0  (224 pts)
+  epoch  -10  Tc = 3983.57721  dTc =  +10.0 min  depth =     3128 +/-    269 ppm  snr =  11.6  (302 pts)
+  epoch   -3  Tc = 4241.72986  dTc =   -0.1 min  depth =     2862 +/-    265 ppm  snr =  10.8  (302 pts)
+  epoch   -2  Tc = 4278.60881  dTc =  -68.0 min  depth =     4474 +/-   1727 ppm  snr =   2.6  (169 pts)
+  epoch   -1  Tc = 4315.48776  dTc =   +9.0 min  depth =     2624 +/-    248 ppm  snr =  10.6  (302 pts)
+  epochs not usable (73):
+    epoch  -79  Tc = 1438.930  no data
+    epoch  -78  Tc = 1475.809  no data
+    epoch  -77  Tc = 1512.688  no data
+    epoch  -76  Tc = 1549.567  no data
+    epoch  -75  Tc = 1586.445  no data
+    epoch  -74  Tc = 1623.324  no data
+    epoch  -73  Tc = 1660.203  no data
+    epoch  -72  Tc = 1697.082  no data
+    epoch  -71  Tc = 1733.961  no data
+    epoch  -70  Tc = 1770.840  no data
+    epoch  -69  Tc = 1807.719  no data
+    epoch  -68  Tc = 1844.598  no data
+    epoch  -67  Tc = 1881.477  no data
+    epoch  -66  Tc = 1918.356  no data
+    epoch  -65  Tc = 1955.235  no data
+    epoch  -64  Tc = 1992.114  no data
+    epoch  -63  Tc = 2028.993  no data
+    epoch  -62  Tc = 2065.872  no data
+    epoch  -61  Tc = 2102.751  no data
+    epoch  -59  Tc = 2176.509  no data
+    epoch  -58  Tc = 2213.388  no data
+    epoch  -57  Tc = 2250.267  no data
+    epoch  -56  Tc = 2287.146  no data
+    epoch  -55  Tc = 2324.024  no data
+    epoch  -54  Tc = 2360.903  no data
+    epoch  -53  Tc = 2397.782  no data
+    epoch  -52  Tc = 2434.661  no data
+    epoch  -51  Tc = 2471.540  no data
+    epoch  -50  Tc = 2508.419  no data
+    epoch  -49  Tc = 2545.298  no data
+    epoch  -48  Tc = 2582.177  no data
+    epoch  -47  Tc = 2619.056  no data
+    epoch  -46  Tc = 2655.935  no data
+    epoch  -45  Tc = 2692.814  no data
+    epoch  -44  Tc = 2729.693  no data
+    epoch  -43  Tc = 2766.572  no data
+    epoch  -42  Tc = 2803.451  no data
+    epoch  -41  Tc = 2840.330  no data
+    epoch  -40  Tc = 2877.209  no data
+    epoch  -39  Tc = 2914.088  no data
+    epoch  -38  Tc = 2950.967  no data
+    epoch  -37  Tc = 2987.846  no data
+    epoch  -36  Tc = 3024.725  no data
+    epoch  -35  Tc = 3061.603  no data
+    epoch  -34  Tc = 3098.482  no data
+    epoch  -33  Tc = 3135.361  no data
+    epoch  -32  Tc = 3172.240  no data
+    epoch  -31  Tc = 3209.119  no data
+    epoch  -30  Tc = 3245.998  no data
+    epoch  -29  Tc = 3282.877  no data
+    epoch  -28  Tc = 3319.756  no data
+    epoch  -27  Tc = 3356.635  no data
+    epoch  -26  Tc = 3393.514  no data
+    epoch  -25  Tc = 3430.393  no data
+    epoch  -24  Tc = 3467.272  no data
+    epoch  -23  Tc = 3504.151  no data
+    epoch  -22  Tc = 3541.030  no data
+    epoch  -21  Tc = 3577.909  no data
+    epoch  -20  Tc = 3614.788  no data
+    epoch  -19  Tc = 3651.667  no data
+    epoch  -18  Tc = 3688.546  no data
+    epoch  -17  Tc = 3725.425  no data
+    epoch  -16  Tc = 3762.304  no data
+    epoch  -15  Tc = 3799.182  no data
+    epoch  -14  Tc = 3836.061  no data
+    epoch  -13  Tc = 3872.940  no data
+    epoch  -12  Tc = 3909.819  no data
+    epoch   -9  Tc = 4020.456  no data
+    epoch   -8  Tc = 4057.335  no data
+    epoch   -7  Tc = 4094.214  no data
+    epoch   -6  Tc = 4131.093  no data
+    epoch   -5  Tc = 4167.972  no data
+    epoch   -4  Tc = 4204.851  no data
+  linear ephemeris from 6 transits: P = 36.87868 +/- 0.00006 d, T0 = 4352.37156 +/- 0.00225; O-C rms = 3.8 min, chi2_red = 0.32
+  adopted refined ephemeris: P 36.87895 -> 36.87868, T0 4352.36671 -> 4352.37156
+  after refinement: 7 usable transits, mean |dTc| = 13.1 min
+  weighted mean depth = 2825 +/- 117 ppm
+  constant-depth chi2/dof = 1.91 (6 dof)
+  odd/even difference = 0.76 sigma
+  depth at phase 0.5 (P/2 and secondary-eclipse test): 163 +/- 169 ppm from 3 epochs (1.0 sigma)
+    primary 2825 +/- 117 ppm vs phase 0.5 163 +/- 169 ppm: difference -12.9 sigma
+  adopted depth = weighted per-transit mean (2825 ppm, chi2_red = 1.91)
+
+--- Secondary-eclipse search at all phases (widths [0.5, 0.75, 1.0, 1.5, 2.0] x T14 = 5.33 h; first-pass light curve) ---
+  phase coverage 98 %; S/N over phases: median 1.3, scatter 2.1
+  candidate phase 0.3430  width 2.00 T14  depth   2107 ppm  S/N  16.2  (3 events; without the strongest, epoch -2: S/N 0.5; inflated by the event scatter: S/N 0.6)  rejected: carried by one event; event depths inconsistent (chi2_red 733.6; S/N with scatter-inflated errors 0.6)
+  candidate phase 0.3493  width 2.00 T14  depth   1010 ppm  S/N   6.9  (3 events; without the strongest, epoch -2: S/N 2.2; inflated by the event scatter: S/N 0.7)  rejected: not significant; carried by one event; event depths inconsistent (chi2_red 102.6; S/N with scatter-inflated errors 0.7)
+  candidate phase 0.0238  width 1.00 T14  depth    145 ppm  S/N   1.4  (6 events; without the strongest, epoch -3: S/N 0.2; inflated by the event scatter: S/N 1.1)  rejected: not significant; carried by one event; event depths inconsistent (chi2_red 1.7; S/N with scatter-inflated errors 1.1)
+  candidate phase 0.6582  width 1.00 T14  depth    -90 ppm  S/N  -0.9  (6 events; without the strongest, epoch -80: S/N -1.8; inflated by the event scatter: S/N -0.6)  rejected: not significant; carried by one event; event depths inconsistent (chi2_red 1.8; S/N with scatter-inflated errors -0.6); dip in only 17 % of the events
+  candidate phase 0.3366  width 2.00 T14  depth    582 ppm  S/N   4.6  (3 events; without the strongest, epoch -2: S/N -0.2; inflated by the event scatter: S/N 0.4)  rejected: not significant; carried by one event; event depths inconsistent (chi2_red 145.1; S/N with scatter-inflated errors 0.4)
+  no coherent secondary eclipse; 3-sigma depth limit (width T14): 450 ppm median over phases, 469 ppm at phase 0.5, 3592 ppm worst case (note: an eccentric, inclined orbit can avoid a secondary eclipse altogether)
+  surface-brightness ratio 0.159 (secondary / primary depth, 800 nm) -> companion brightness temperature < 3561 K (primary 5539 K; assumes equal occulted areas). A self-luminous M dwarf has T ~ 2800-3500 K.
+
+Adopted ephemeris: P = 36.878680 d, T0 = 4352.37156, T14 = 5.33 h, depth = 2825 ppm
+
+--- In-transit centroid offsets (flux-weighted centroid of the aperture; formal errors only - for the location of the signal use the difference imaging below) ---
+ sector        dx        dy   offset     sigma
+      3 -0.009274 -0.003956 0.010083  1.233182
+     30 -0.010412 -0.022909 0.025164  3.610567
+     97 -0.005293 -0.006851 0.008657  2.701652
+    106 -0.004518  0.007045 0.008369  2.761933
+    107  0.034177  0.106795 0.112131 47.426104
+    108  0.006796 -0.002146 0.007127  5.035576
+
+--- Limb-darkened transit fit of the folded LC (LD mode: claret) ---
+  smoothing box (bin + native cadence): 12.2 min,  160 bins,  5 free parameters
+  rp   = 0.05063 +/- 0.00365
+  b    = 0.00135 +/- 272.58953
+  aRs  = 53.95475 +/- 19.80472
+  t0s  = 0.00092 +/- 0.00210
+  f0   = 1.00002 +/- 0.00006
+  u1, u2 = 0.386, 0.206  (fixed)
+  Rp/Rs = 0.0506,  b = 0.001,  a/Rs = 53.955,  i = 90.00 deg
+  depth = 3059 ppm,  T14 = 5.486 h,  T23 = 4.958 h
+  rho_star (circular orbit) = 2.185 g/cm^3
+  rho_star from TIC mass/radius       = 1.419 g/cm^3   (consistency check)
+  residual rms = 636 ppm  (OOT bin scatter 644 ppm, chi2_red vs that = 1.01)
+
+  updating adopted depth from LD fit: 2825 -> 3059 ppm
+  updating adopted T14 from LD fit: 5.33 -> 5.49 h
+  adopted for TRICERATOPS: depth = 3059 ppm, T14 = 5.49 h
+
+--- Flux uncertainty for TRICERATOPS ---
+  n_bins_used                  160
+  sigma_point_ppm              1884
+  sigma_white_bin_ppm          503.6
+  sigma_empirical_bin_ppm      668
+  floor_ppm                    0
+  sigma_lightkurve_mean_ppm    581.9
+  chi2_red_model               0.9355
+  inflation                    1
+  reference_model              limb-darkened fit
+  sigma_used_ppm               668
+
+--- Per-transit depths with the limb-darkened shape (smoothed with each sector's cadence; 7 transits) ---
+  epoch  -80  Tc = 1402.07716  dTc =   -0.3 +/-  9.7 min  depth =     2778 +/-    317 ppm
+  epoch  -60  Tc = 2139.65076  dTc =   +5.8 +/-  5.3 min  depth =     2439 +/-    301 ppm
+  epoch  -11  Tc = 3946.70608  dTc =   +1.7 +/-  3.6 min  depth =     3845 +/-    359 ppm
+  epoch  -10  Tc = 3983.58476  dTc =   +3.4 +/-  5.5 min  depth =     3201 +/-    271 ppm
+  epoch   -3  Tc = 4241.73552  dTc =   -9.2 +/-  5.3 min  depth =     3024 +/-    267 ppm
+  epoch   -2  Tc = 4278.61420  dTc =  -24.4 +/-  8.8 min  depth =     4074 +/-   1410 ppm
+  epoch   -1  Tc = 4315.49288  dTc =   +0.4 +/-  5.0 min  depth =     2742 +/-    251 ppm
+
+--- Per-transit depths per sector (raw aperture depths divided by g_s) ---
+  epoch  sector  cadence    aperture        g_s    on-target depth
+    -80       3   30.0 min  optimal        0.557      4986 +/-   568 ppm
+    -60      30   10.0 min  optimal        0.556      4386 +/-   541 ppm
+    -11      97    3.3 min  optimal        0.559      6881 +/-   643 ppm
+    -10      97    3.3 min  optimal        0.559      5729 +/-   484 ppm
+     -3     106    3.3 min  optimal        0.561      5390 +/-   475 ppm
+     -2     107    3.3 min  optimal        0.557      7311 +/-  2531 ppm
+     -1     108    3.3 min  optimal        0.556      4936 +/-   453 ppm
+  weighted mean on-target depth = 5322 +/- 210 ppm
+  constant-depth chi2/dof = 1.88
+  odd/even difference (all cadences) = 0.92 sigma
+  cadence   3.3 min: odd    5509 +/-   292 ppm (3), even    5785 +/-   476 ppm (2): -0.49 sigma
+
+--- Eclipse timing variations (7 mid-times) ---
+  linear ephemeris: P = 36.878595 +/- 0.000087 d; O-C rms = 9.4 min, chi2_red = 2.06
+  odd - even mid-times: +2.59 +/- 4.18 min (+0.6 sigma); if the true period is 2P (73.7574 d) this gives e cos(w) = +3.8e-05 +/- 6.2e-05
+  quadratic ephemeris: dP/dE = -1.147 +/- 0.982 s per cycle (-1.2 sigma); delta chi2 vs linear = 2.6
+  light-travel-time search (outer period 111-8740 d): best P_out = 123 d, amplitude 17.1 +/- 4.6 min, delta chi2 = 9.8 (4 extra parameters: not significant below ~15)
+  3-sigma limit on an LTTE amplitude for P_out <= 2913 d (median over periods): 33.3 min, i.e. a12 sin(i) < 4.00 AU
+  eclipse-depth trend: +61 +/- 53 ppm/yr (+1.2 sigma, errors scaled by the scatter); a significant trend in a grazing eclipse points to a changing inclination (third body) - or to a changing aperture dilution
+
+  aperture photometry is not crowding-corrected: dilution_corrected = False for calc_depths / calc_probs (override with --dilution-corrected)
+  target flux fraction: pipeline vs triceratops field model, largest difference 0.001 over 7 sectors
+
+--- Difference-image centroids ---
+ sector  n_epochs       snr   x_diff   y_diff  sigma_stat_pix  sigma_pix  sigma_arcsec  offset_cat_arcsec  offset_cat_sigma  offset_direct_pix  offset_direct_arcsec  offset_direct_sigma
+      3         1  7.691545 5.189922 4.503816        0.198494   0.222261      4.349580           6.515890          1.498050           0.438383              8.579010             1.972376
+     30         1 10.875673 5.363504 5.136610        0.187908   0.212860      4.284200           3.530438          0.824060           0.292804              5.893215             1.375570
+     97         2  3.520251 4.808875 4.890355        1.104570   1.109087     23.037698           4.705577          0.204256           0.151555              3.148054             0.136648
+    106         1 17.820597 5.159970 4.747330        0.092430   0.136174      2.710141           2.512294          0.926998           0.070519              1.403465             0.517857
+    107         1  0.006570 4.916606 5.046710        2.999104   3.000771     62.252943          12.173758          0.195553           0.710307             14.735786             0.236708
+    108         1 17.942187 4.943869 5.090508        0.107863   0.147087      2.940920           3.916951          1.331879           0.129543              2.590137             0.880723
+  (centroid errors include a systematic floor of 0.10 px in quadrature)
+  difference-image centroid vs target (direct-image PRF): median 0.9 sigma over 5 sectors with S/N >= 3; consistent with the target
+  stars excluded by difference imaging: 44 (first: [65344121, 65344122, 65344128, 65344131, 65344136, 65344138, 65344139, 65344145])
+  44 excluded star(s) have tdepth = 0 (cannot host the signal); not passed to remove_star
+triceratops version: 1.0.17
+  ! triceratops < 1.1.0 normalises the scenario evidences with exp(lnZ)/sum(exp(lnZ)) and underflows to NaN for very poor fits; consider upgrading.  Invalid runs are detected and retried below.
+
+Stars in the field used for the calculation:
+             ID    Bmag     Vmag     Tmag    Jmag    Hmag    Kmag  gmag  rmag  imag  zmag         ra        dec      mass       rad    Teff         d       plx  sep (arcsec)  PA (E of N)     fluxratio    tdepth
+0      65344135  13.170  12.9830  12.3302  11.636  11.340  11.296   NaN   NaN   NaN   NaN  39.307134 -26.314592  0.970000  0.987852  5539.0   373.116  2.651520         0.000        0.000  5.579152e-01  0.005483
+1      65344134  12.007  13.1710  12.5621  11.853  11.532  11.424   NaN   NaN   NaN   NaN  39.308641 -26.315503  0.940000  0.914508  5391.0   365.486  2.707320         5.864      123.991  4.411513e-01  0.006934
+2     632342902     NaN  19.9536  19.2170     NaN     NaN     NaN   NaN   NaN   NaN   NaN  39.308025 -26.309928       NaN       NaN     NaN   946.706  0.758283        17.037        9.717  8.381230e-04  0.000000
+3      65344129  18.147  20.3150  19.1693  16.425  15.691  15.183   NaN   NaN   NaN   NaN  39.305542 -26.332097       NaN       NaN     NaN       NaN       NaN        63.227      184.661  7.299752e-05  0.000000
+4      65344961  16.565      NaN  17.2510  16.751  16.073  15.293   NaN   NaN   NaN   NaN  39.326263 -26.329947       NaN       NaN     NaN       NaN       NaN        82.857      131.851  1.126732e-05  0.000000
+5     632342799     NaN  21.1267  19.7664     NaN     NaN     NaN   NaN   NaN   NaN   NaN  39.330439 -26.324772       NaN       NaN     NaN       NaN       NaN        83.653      115.988  9.090697e-07  0.000000
+6     632342901     NaN  20.9016  19.9147     NaN     NaN     NaN   NaN   NaN   NaN   NaN  39.283507 -26.325302       NaN       NaN     NaN  1198.580 -1.681070        85.437      243.168  6.708456e-06  0.000000
+7     632342900     NaN  19.3065  18.9090     NaN     NaN     NaN   NaN   NaN   NaN   NaN  39.291263 -26.338393       NaN       NaN     NaN  1577.270  0.001808        99.821      210.863  6.951508e-07  0.000000
+8      65344136  20.258  19.2112  17.3420  16.064  15.592  15.481   NaN   NaN   NaN   NaN  39.275914 -26.302426  0.392419  0.400832  3662.0   686.119  1.431540       109.859      293.489  5.361421e-07  0.000000
+9      65344131  17.666  16.8853  15.2879  14.067  13.452  13.323   NaN   NaN   NaN   NaN  39.275177 -26.328432  0.538271  0.542294  3887.0   386.010  2.563030       114.524      244.205  2.255901e-06  0.000000
+10     65344962  16.371      NaN  16.3290  15.753  15.150  14.463   NaN   NaN   NaN   NaN  39.338359 -26.330072       NaN       NaN     NaN       NaN       NaN       115.138      118.954  7.366940e-09  0.000000
+11  10000321044     NaN      NaN  15.9390  14.189  13.967  13.023   NaN   NaN   NaN   NaN  39.338482 -26.330025       NaN       NaN     NaN       NaN       NaN       115.404      118.785  9.694647e-09  0.000000
+12    632342903     NaN  19.1121  18.2433     NaN     NaN     NaN   NaN   NaN   NaN   NaN  39.274342 -26.329231       NaN       NaN  4892.0  1735.130  0.064510       118.209      243.517  6.090197e-08  0.000000
+13     65344960  17.844  16.3870  15.8317  14.856  14.264  14.303   NaN   NaN   NaN   NaN  39.340012 -26.329219       NaN  3.416010  4766.0  4778.680 -0.069652       118.436      116.405  3.983122e-09  0.000000
+14     65344957     NaN  20.7763  18.7818  16.690  16.287  15.551   NaN   NaN   NaN   NaN  39.344203 -26.319646       NaN       NaN     NaN       NaN       NaN       120.990       98.656  7.780135e-11  0.000000
+15     65344966  20.197      NaN  18.2500  17.015  16.265  15.357   NaN   NaN   NaN   NaN  39.326621 -26.344042       NaN       NaN     NaN       NaN       NaN       123.261      149.335  1.661525e-10  0.000000
+16    632342797     NaN  20.2742  19.5940     NaN     NaN     NaN   NaN   NaN   NaN   NaN  39.324630 -26.346748       NaN       NaN     NaN  1206.740 -0.148073       128.792      154.008  8.311431e-12  0.000000
+17  10000321045     NaN      NaN  16.7680  15.018  14.199  13.892   NaN   NaN   NaN   NaN  39.342201 -26.336693       NaN       NaN     NaN       NaN       NaN       138.320      125.122  1.534238e-12  0.000000
+18     65344964  16.413  19.4119  18.2369  15.519  14.852  14.311   NaN   NaN   NaN   NaN  39.342104 -26.336874       NaN       NaN     NaN       NaN       NaN       138.440      125.418  3.823153e-13  0.000000
+19     65344968  18.820      NaN  17.6410  16.672  15.834  15.173   NaN   NaN   NaN   NaN  39.331759 -26.346272       NaN       NaN     NaN       NaN       NaN       138.994      145.142  9.088593e-13  0.000000
+20     65344959  19.428      NaN  17.7120  16.651  15.954  15.319   NaN   NaN   NaN   NaN  39.348116 -26.326653       NaN       NaN     NaN       NaN       NaN       139.184      108.186  3.238350e-13  0.000000
+21     65344951  20.320  19.5540  17.8962  16.378  15.862  15.402   NaN   NaN   NaN   NaN  39.343229 -26.293031  0.600000  0.488700  3874.0  1074.990  0.819491       139.977       56.331  1.285493e-13  0.000000
+22    632342803     NaN      NaN  20.4555     NaN     NaN     NaN   NaN   NaN   NaN   NaN  39.348665 -26.326557       NaN       NaN     NaN       NaN       NaN       140.763      107.827  1.346961e-14  0.000000
+23     65344956  15.612  14.9620  14.1274  13.400  12.929  12.931   NaN   NaN   NaN   NaN  39.351457 -26.318720  0.920000  0.795858  5327.0   638.434  1.537520       143.793       95.942  7.513190e-13  0.000000
+24     65344965  16.594  15.8680  14.8037  13.849  13.313  13.283   NaN   NaN   NaN   NaN  39.342722 -26.338921  0.770000  0.737177  4772.0   643.968  1.524180       144.415      127.342  8.614398e-13  0.000000
+25    632342798     NaN  20.4583  19.2110     NaN     NaN     NaN   NaN   NaN   NaN   NaN  39.341142 -26.341432       NaN       NaN     NaN   588.025  1.790250       146.206      131.374  8.345457e-15  0.000000
+26     65344138  19.687  18.3942  16.5662  15.293  14.622  14.377   NaN   NaN   NaN   NaN  39.267307 -26.295191  0.520640  0.523337  3709.0   595.616  1.653860       146.282      298.510  1.427022e-11  0.000000
+27    632342899     NaN  21.0007  19.8828     NaN     NaN     NaN   NaN   NaN   NaN   NaN  39.289868 -26.352922       NaN       NaN     NaN   979.549 -0.221031       148.810      201.982  1.043411e-13  0.000000
+28     65344963  19.041  17.8878  16.6857  15.594  15.007  14.837   NaN   NaN   NaN   NaN  39.351158 -26.331610  0.670000  0.749672  4289.0  1216.200  0.770991       154.699      113.340  1.084776e-15  0.000000
+29    632342904     NaN      NaN  20.6941     NaN     NaN     NaN   NaN   NaN   NaN   NaN  39.259656 -26.322059       NaN       NaN     NaN       NaN       NaN       155.545      260.038  1.863018e-14  0.000000
+30     65344139  20.228  20.4040  17.8194  16.236  15.738  15.322   NaN   NaN   NaN   NaN  39.263400 -26.293677  0.263721  0.288650  3334.0   422.239  2.380240       159.969      298.068  1.855526e-14  0.000000
+31     65344953  18.921  18.4180  17.5312  16.763  16.011  15.198   NaN   NaN   NaN   NaN  39.354632 -26.300650       NaN       NaN  4849.0  1378.690  0.631939       161.291       71.880  1.081580e-17  0.000000
+32     65344145  19.244  17.8486  16.3763  15.145  14.550  14.420   NaN   NaN   NaN   NaN  39.297214 -26.269825  0.597147  0.611220  4008.0   765.059  1.276630       164.312      348.761  5.731006e-17  0.000000
+33     65344122  15.663  14.5070  13.4239  12.490  11.881  11.787   NaN   NaN   NaN   NaN  39.306670 -26.360809  0.710000  0.769977  4507.0   314.245  3.153600       166.389      180.516  1.384786e-15  0.000000
+34    632342888     NaN  20.1230  19.6100     NaN     NaN     NaN   NaN   NaN   NaN   NaN  39.282393 -26.355756       NaN       NaN     NaN   710.000  1.386130       168.324      208.304  4.084324e-17  0.000000
+35     65344972  19.586      NaN  17.5640  16.469  15.726  15.290   NaN   NaN   NaN   NaN  39.328259 -26.359682       NaN       NaN     NaN       NaN       NaN       176.051      157.229  5.046046e-20  0.000000
+36    632342804     NaN  20.8422  19.6009     NaN     NaN     NaN   NaN   NaN   NaN   NaN  39.361792 -26.317464       NaN       NaN     NaN       NaN       NaN       176.676       93.367  3.409064e-22  0.000000
+37    632342795     NaN  21.2456  19.5123     NaN     NaN     NaN   NaN   NaN   NaN   NaN  39.347343 -26.348542       NaN       NaN  3814.0  1200.130 -0.730129       178.235      133.301  1.292111e-21  0.000000
+38     65344128  20.442  19.3594  17.1943  15.642  15.140  14.930   NaN   NaN   NaN   NaN  39.258444 -26.337989  0.400678  0.408175  3512.0   545.253  1.816260       178.259      241.792  3.278990e-17  0.000000
+39    632342905     NaN  18.8904  18.4076     NaN     NaN     NaN   NaN   NaN   NaN   NaN  39.347357 -26.279255       NaN       NaN  6224.0  2477.420 -0.629276       181.756       45.589  4.285959e-23  0.000000
+40    632342796     NaN  21.1633  19.8472     NaN     NaN     NaN   NaN   NaN   NaN   NaN  39.349293 -26.350234       NaN       NaN     NaN   923.104 -0.025911       186.991      133.338  6.780670e-24  0.000000
+41     65344967  20.125      NaN  17.9310  16.773  15.836  15.546   NaN   NaN   NaN   NaN  39.354762 -26.344439       NaN       NaN     NaN       NaN       NaN       187.511      124.972  1.667668e-23  0.000000
+42     65344121     NaN  20.4015  18.2552  16.151  15.583  15.148   NaN   NaN   NaN   NaN  39.307757 -26.366906       NaN       NaN  3562.0   230.002  4.370760       188.339      179.389  1.087903e-22  0.000000
+43    632342906     NaN  18.0829  17.5771     NaN     NaN     NaN   NaN   NaN   NaN   NaN  39.346928 -26.275857  1.160000  0.601658  6124.0  3030.410 -0.184285       189.578       42.654  5.791106e-25  0.000000
+44     65344973  17.153  16.0470  17.4918  14.618  13.951  13.497   NaN   NaN   NaN   NaN  39.337065 -26.360247       NaN       NaN     NaN       NaN       NaN       190.627      149.571  8.653648e-24  0.000000
+45  10000321042     NaN      NaN  15.2750  13.441  12.855  12.531   NaN   NaN   NaN   NaN  39.337231 -26.360302       NaN       NaN     NaN       NaN       NaN       191.068      149.463  5.093023e-23  0.000000
+46     65344978  19.069  18.1891  16.5909  15.449  14.705  14.577   NaN   NaN   NaN   NaN  39.319738 -26.368874  0.511354  0.513620  3876.0   635.724  1.546240       199.601      168.249  2.495269e-25  0.000000
+47     65344944  19.879  19.0396  17.4338  16.197  15.532  15.409   NaN   NaN   NaN   NaN  39.323427 -26.260783  0.455414  0.458334  3896.0   794.824  1.222130       200.724       15.192  7.840265e-28  0.000000
+
+--- NFPP input: which neighbours can produce the signal ---
+  depth adopted for calc_depths      : 3059 ppm  (target flux ratio 0.5579)
+  dip in the aperture light curve    : 3059 ppm
+  min. neighbour flux ratio needed   : 3.06e-03  (a 100 % eclipse of a star with less flux cannot do it)
+  neighbours in table / still used   : 47 / 1
+  brightest neighbour                : TIC 65344134, Tmag 12.56, sep 5.9 arcsec, flux ratio 4.41e-01
+    -> would need an eclipse of 1 % of its own flux (possible)
+  neighbours that can host the signal:
+      ID    Tmag  sep (arcsec)  fluxratio   tdepth
+65344134 12.5621         5.864   0.441151 0.006934
+
+flux uncertainty passed to calc_probs: 668 ppm;  N = triceratops default;  model exposure 12.2 min (20 sub-samples)
+
+Scenario probabilities (last iteration):
+          ID scenario       M_s       R_s     P_orb        inc         b       ecc           w        R_p      M_EB      R_EB    M_comp    R_comp  flux_ratio_comp_T          prob         lnZ
+0   65344135       TP  0.970000  0.987852  36.87868  89.735530  0.225565  0.132294  332.717234   7.366212  0.000000  0.000000  0.000000  0.000000           0.000000  3.634054e-01  570.744506
+1   65344135       EB  0.970000  0.987852  36.87868  89.115612  0.397023  0.573407  151.449995   0.000000  0.136987  0.167276  0.000000  0.000000           0.000000  3.990878e-31  501.760616
+2   65344135    EBx2P  0.970000  0.987852  73.75736  89.225165  0.779161  0.727102  199.429323   0.000000  0.922770  0.967975  0.000000  0.000000           0.000000  5.354672e-09  552.711446
+3   65344135      PTP  0.970000  0.987852  36.87868  89.976690  0.027040  0.431521  277.375563   7.407232  0.000000  0.000000  0.369007  0.375875           0.019290  1.743713e-01  570.010174
+4   65344135      PEB  0.970000  0.987852  36.87868  89.167342  0.552624  0.416584  170.469845   0.000000  0.161753  0.193732  0.913296  0.955032           0.435401  1.803395e-21  523.992126
+5   65344135   PEBx2P  0.970000  0.987852  73.75736  89.194297  1.064316  0.433299  180.692612   0.000000  0.923804  0.969404  0.598916  0.595646           0.079601  8.599557e-12  546.277432
+6   65344135      STP  0.839242  0.865943  36.87868  89.951136  0.037389  0.154215   58.090473  10.885188  0.000000  0.000000  0.970000  0.987852           0.355463  1.541630e-02  567.584413
+7   65344135      SEB  0.773956  0.802621  36.87868  89.908085  0.088829  0.001557  232.139602   0.000000  0.088908  0.103429  0.970000  0.987852           0.281042  1.021586e-02  567.172928
+8   65344135   SEBx2P  0.582083  0.586420  73.75736  89.474058  0.927954  0.363647  157.426906   0.000000  0.581773  0.586212  0.970000  0.987852           0.068903  1.085331e-08  553.417946
+9   65344135      DTP  0.970000  0.987852  36.87868  89.577767  0.376146  0.143972  313.967921   7.454073  0.000000  0.000000  0.804000  0.000000           0.003948  1.095295e-01  569.545181
+10  65344135      DEB  0.970000  0.987852  36.87868  89.160789  0.649282  0.499004  200.714421   0.000000  0.122412  0.149949  0.281000  0.000000           0.000420  2.739010e-27  510.594541
+11  65344135   DEBx2P  0.970000  0.987852  73.75736  88.698511  0.793428  0.890726  210.304170   0.000000  0.947723  0.987852  0.305000  0.000000           0.000492  2.474589e-13  542.729210
+12  65344135      BTP  1.133000  1.219407  36.87868  89.127173  0.565647  0.278952  357.934356  14.960241  0.000000  0.000000  0.970000  0.987852           0.417903  5.340745e-05  561.919182
+13  65344135      BEB  0.949000  0.889543  36.87868  89.496118  0.620740  0.620066  239.553651   0.000000  0.106918  0.129720  0.970000  0.987852           0.193933  3.798352e-06  559.275799
+14  65344135   BEBx2P  0.924000  1.559085  73.75736  88.031313  0.646525  0.678340   77.229416   0.000000  0.892564  0.927733  0.970000  0.987852           0.036020  1.235039e-08  553.547164
+15  65344134      NTP  0.940000  0.914508  36.87868  89.678033  0.259856  0.093278   49.207276   7.771178  0.000000  0.000000  0.000000  0.000000           0.000000  3.270042e-01  570.638960
+16  65344134      NEB  0.940000  0.914508  36.87868  88.920630  0.198661  0.928945  200.475918   0.000000  0.117349  0.143560  0.000000  0.000000           0.000000  8.037429e-12  546.209830
+17  65344134   NEBx2P  0.940000  0.914508  73.75736  89.205249  0.511591  0.715117  153.317153   0.000000  0.930994  0.914508  0.000000  0.000000           0.000000  6.325990e-08  555.180728
+
+lnZ per scenario (last iteration): [570.7 501.8 552.7 570.  524.  546.3 567.6 567.2 553.4 569.5 510.6 542.7 561.9 559.3 553.5 570.6
+ 546.2 555.2]
+
+valid runs: 20/20; final sigma = 668 ppm
+FPP  (mean of per-run values) = 0.39148 +/- 0.05668   [run-to-run scatter]
+NFPP (mean of per-run values) = 0.37757 +/- 0.05799
+
+Pooled evidences of 20 runs at sigma = 668 ppm (= one run with 20 x N draws):
+FPP  = 0.38941 +/- 0.01364   [bootstrap over runs]
+NFPP = 0.37566 +/- 0.01390
+  most probable scenarios (index: prob, lnZ): 0: 0.429, 571.1, 15: 0.376, 570.9, 3: 0.115, 569.8, 9: 0.066, 569.2
+  largest share of a single run in the leading scenario's evidence: 0.07 (1/n_runs = 0.05 when converged)
+  probability per class of explanation (pooled):
+      0.6106  planet on the target or an unresolved companion (TP, PTP, DTP)
+      0.0136  eclipsing binary on the target / bound companion (EB, EBx2P, PEB, PEBx2P, SEB, SEBx2P, STP)
+      0.0002  unresolved background / foreground star (DEB, DEBx2P, BTP, BEB, BEBx2P)
+      0.3757  resolved nearby star (NTP, NEB, NEBx2P)
+Giacalone+2021 validation criteria (FPP < 0.015 and NFPP < 0.001; based on pooled evidences): NOT passed
+
+======================================================================
+SUMMARY
+======================================================================
+  triceratops_plus: True
+  tic: 65344135
+  script_version: 4.1.1
+  Teff: 5539
+  R_star: 0.987852
+  M_star: 0.97
+  Tmag: 12.3302
+  secondary:
+      detected: False
+      phase: None
+      depth_ppm: None
+      lim3_ppm_median: 450.443
+      companion_T_K: 3561.42
+      coverage: 0.975617
+  P_d: 36.8787
+  T0_BTJD: 4352.37
+  T14_h: 5.33
+  depth_ppm_adopted: 2825.43
+  n_sectors: 7
+  dilution_corrected_per_sector: False
+  ld_fit:
+      rp: 0.0506285
+      b: 0.00134719
+      grazing: False
+      depth_ppm: 3058.86
+      T14_h: 5.48635
+  depth_on_target_ppm: 5321.89
+  depth_chi2_red: 1.88384
+  odd_even_sigma: 0.92209
+  g_target_range: [0.5556037418189482, 0.5611198090948949]
+  etv:
+      n: 7
+      P: 36.8786
+      T0: 4352.37
+      eP: 8.71578e-05
+      rms_min: 9.39261
+      chi2_red: 2.06294
+      odd_even_dt_min: 2.59108
+      odd_even_dt_err_min: 4.18391
+      ecosw_2P: 3.83207e-05
+      ecosw_2P_err: 6.18777e-05
+      dPdE_d: -1.32772e-05
+      dPdE_err_d: 1.13652e-05
+      Pdot: -3.60025e-07
+      dchi2_quad: 2.62402
+      ltte_best_P: 123.44
+      ltte_best_K_min: 17.1185
+      ltte_dchi2: 9.80076
+      ltte_lim3_min: 33.2855
+      ltte_lim3_au: 4.00222
+      depth_slope_ppm_yr: 60.9422
+      depth_slope_err_ppm_yr: 52.8828
+  di_offset_sigma_median: 0.880723
+  scenario_classes:
+      planet on the target or an unresolved companion (TP, PTP, DTP): 0.61059
+      eclipsing binary on the target / bound companion (EB, EBx2P, PEB, PEBx2P, SEB, SEBx2P, STP): 0.0135867
+      unresolved background / foreground star (DEB, DEBx2P, BTP, BEB, BEBx2P): 0.00016116
+      resolved nearby star (NTP, NEB, NEBx2P): 0.375662
+  FPP: 0.38941
+  NFPP: 0.375662
+  verdict: NOT passed
+  n_runs: 20
+  n_valid: 20
+  dominance: 0.0714061
+  sigma_ppm: 668.026
