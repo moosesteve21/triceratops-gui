@@ -1,0 +1,39 @@
+# Python >= 3.13 (tested with 3.14 on Windows 11: 62/62 tests pass).
+# On Python < 3.13 triceratops 1.1.0 pins numpy<2 and scipy<1.14.
+#
+# celerite has no wheels for Python >= 3.13 and is compiled from source, which
+# needs a C++ compiler (Windows: Visual Studio Build Tools with the C++ workload).
+#
+#   pip install -r requirements.txt
+
+# Core numerics
+numpy==2.5.4
+scipy==1.18.1
+pandas==2.3.3
+matplotlib==3.11.2
+astropy==7.2.3
+numba==0.68.1
+
+# Light curves, detrending, transit search
+lightkurve==2.6.0
+astroquery==0.4.11
+wotan==2.1
+transitleastsquares==2.2.0
+
+# False-positive probabilities
+triceratops==1.1.0
+# triceratops 1.1 requires PyTransit 2.2 (it calls QuadraticModel.evaluate_pv)
+PyTransit==2.2.0
+arviz==0.23.4
+beautifulsoup4==4.15.0
+celerite==0.4.3
+corner==2.3.0
+emcee==3.1.6
+MechanicalSoup==1.4.0
+pyrr==0.10.3
+seaborn==0.13.2
+# pytransit imports pkg_resources, which setuptools >= 81 removes
+setuptools==80.10.2
+
+# Tests
+pytest==9.2.0

@@ -1,0 +1,20 @@
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Python bytecode / caches
+__pycache__/
+*.pyc
+*.pyo
+
+# Packaging / tooling
+*.egg-info/
+.pytest_cache/
+
+# Scratch / run output
+test/
+scratch/
+
+# Written to the working directory by triceratops' query_gaia_background
+*_gaia_background.csv
