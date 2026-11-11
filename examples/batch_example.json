@@ -1,0 +1,11 @@
+{
+  "name": "example",
+  "results_dir": "results",
+  "workers": 2,
+  "defaults": {"ld_fit": true, "vet_neighbours": true},
+  "candidates": [
+    {"label": "TIC65344135_auto", "profile": "profiles/profile_TIC65344135.json"},
+    {"label": "TIC65344135_off", "profile": "profiles/profile_TIC65344135.json",
+     "options": {"ephem_search": "off"}}
+  ]
+}

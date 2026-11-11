@@ -106,6 +106,19 @@ python triceratops_audit.py path/to/output_folder --tic 65344135
 
 Writes `audit_<TIC>.json`, `.txt` and `.pdf` with independent checks of the claims in the run (deterministic, no language model).
 
+### Batch runs: prefetch now, test later
+
+```bash
+python triceratops_batch.py batches/round3.json --mode prefetch   # download all cutouts (network)
+python triceratops_batch.py batches/round3.json --mode test       # pipeline + audit (CPU), from the cache
+python triceratops_batch.py batches/round3.json --mode status
+python triceratops_batch.py batches/round3.json --mode clean      # delete the shared cache when done
+```
+
+The batch file lists the candidates, each with profile-style options and/or a profile to start from; see `examples/batch_example.json` and the docstring of `triceratops_batch.py`. `prefetch` creates `results/<name>/<label>/` for every candidate and downloads every TESScut cutout the runs will read (every sector, every cutout size) into one shared cache, `results/<name>/tesscut_cache`, using `triceratops_validation.py --prefetch-only`. `test` runs them a few at a time (`--workers`) with `--download-dir` pointing at that cache, then audits each one; finished candidates are skipped unless `--force`. The cache is only deleted by `clean`, so the tests can be rerun with other settings. `--dry-run` prints the commands, `--only LABEL ...` selects candidates. Catalogue queries (TIC, Gaia, TRILEGAL) are not cached and still need the network during `test`.
+
+For flaky MAST connections: every run times out stalled requests and retries MAST queries and downloads (`--net-timeout`, default 300 s; `--net-retries`, default 4). The batch script also stops a prefetch or test that runs too long (`--prefetch-timeout`, `--test-timeout`), tries failed prefetches again (`--prefetch-passes`, default 3) and reruns a test that ended without results (`--test-retries`, default 1).
+
 ---
 
 ## Kepler mode (v4.2)
