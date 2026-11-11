@@ -104,6 +104,27 @@ def test_scan_does_not_adopt_fit_to_clustered_transits(tmp_path):
     assert fit["ok"] is False          # 'auto' then falls back to the grid
 
 
+def test_scan_does_not_rescan_with_a_short_baseline_fit(tmp_path):
+    # The input ephemeris is right, but four strong dips early in the data
+    # sit on a slightly different period, and a later sector has dips on that
+    # period's extrapolation (in real data: noise peaks).  A first-pass fit of
+    # the early dips does not constrain the late epochs; rescanning with it
+    # would lock onto the late dips and adopt the wrong period.
+    P, T0, dur, dep = 2.0, 1000.0, 0.05, 3000e-6
+    P_wrong = P + 1.0 / 150             # 1 d (half a period) off by epoch 150
+    rng = np.random.default_rng(11)
+    t = np.concatenate([np.arange(999.0, 1025.0, 2 / 1440),
+                        np.arange(1290.0, 1310.0, 2 / 1440)])
+    f = 1.0 + rng.normal(0, 3e-4, t.size)
+    for e in (1, 2, 11, 12, *range(145, 156)):
+        f[np.abs(t - (T0 + e * P_wrong)) < 0.5 * dur] -= dep
+    cfg = _cfg(tmp_path)
+    P1, T01, fit = tv.check_known_ephemeris(t, f, np.full(t.size, 3e-4), P, T0, dur, cfg)
+    assert fit is not None and max(fit["epochs"]) <= 12, fit
+    assert (P1, T01) == (P, T0)
+    assert fit["ok"] is False
+
+
 def test_refine_from_transits_needs_full_baseline(tmp_path):
     cfg = _cfg(tmp_path)
     dur = 1.3 / 24

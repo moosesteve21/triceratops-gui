@@ -3282,6 +3282,12 @@ def check_known_ephemeris(time, flux, flux_err, P, T0, dur, cfg: Config,
         if fit_i is None:
             break
         fit = fit_i
+        # A first-pass fit that does not predict every epoch with data must
+        # not steer the narrow rescan: extrapolated far from its transits it
+        # lands on whatever noise peak is nearest, and the refit then looks
+        # well constrained.  Stop here; the check below rejects this fit.
+        if it == 0 and not _ephem_constrained(fit["cov"], ep_data, dur, cfg)[0]:
+            break
         P1, T01 = fit["P"], fit["T0"]
         R = max(0.5 * dur, 4.0 * fit["rms_min"] / 1440.0)
     if fit is None or not fit["ok"]:
