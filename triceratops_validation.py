@@ -555,6 +555,10 @@ class Config:
     # Transits closer than this [d] to a data-segment edge are flagged and the
     # depth and odd/even tests are also reported without them.
     edge_transit_d: float = 0.5
+    # Transits with less than this fraction of their in-transit cadences
+    # (lost to gaps, or to the masked transits of other planets) are flagged
+    # the same way.
+    min_transit_coverage: float = 0.7
     # other known planets of the system: [(P, T0, T14_days), ...]
     mask_ephemerides: tuple = ()
     # The LD fit may overwrite the adopted depth / T14 only if its T0 shift
@@ -2461,6 +2465,30 @@ def transit_edge_distance(time, tcs, gap: float = 0.5):
     return np.array(out)
 
 
+def transit_coverage(sector_times, tcs, dur):
+    """Fraction of the cadences expected within +-T14/2 of each mid-time that
+    are in the data, from each sector's own cadence; it drops with gaps and
+    with the masked transits of other planets. 0 outside every sector."""
+    segs = []
+    for t in sector_times:
+        t = np.asarray(t, float)
+        t = np.sort(t[np.isfinite(t)])
+        if t.size >= 2:
+            cad = float(np.median(np.diff(t)))
+            if cad > 0:
+                segs.append((t, cad))
+    out = []
+    for tc in np.asarray(tcs, float):
+        best = 0.0
+        for t, cad in segs:
+            if t[0] - dur <= tc <= t[-1] + dur:
+                n = int(np.searchsorted(t, tc + 0.5 * dur)
+                        - np.searchsorted(t, tc - 0.5 * dur))
+                best = max(best, min(1.0, n * cad / dur))
+        out.append(best)
+    return np.array(out)
+
+
 def mask_other_transits(sd: "SectorData", ephemerides, half_width: float = 0.75) -> int:
     """Drop the cadences within half_width x T14 of the transits of other
     known planets [(P, T0, T14_days), ...]; returns the number dropped."""
@@ -3565,9 +3593,11 @@ def dilution_corrected_depths(dt, fractions, sectors_data, log=None):
     return dict(rows=rows, diag=diag, fractions=fractions)
 
 
-def report_depths_per_sector(dt, sectors_data, cfg: "Config", log=None):
+def report_depths_per_sector(dt, sectors_data, cfg: "Config", log=None, dur=None):
     """Per-transit depths per sector: target fraction, on-target depth,
     constant-depth test and odd/even tests (overall and per cadence).
+    Transits next to a data-segment edge, or (given *dur*, T14 in days) with
+    too little in-transit data, are flagged and the tests repeated without them.
 
     With cfg.dilution_mode == 'sector' the light curve is already on the
     target's scale, so the measured depth IS the on-target depth; otherwise
@@ -3665,17 +3695,35 @@ def report_depths_per_sector(dt, sectors_data, cfg: "Config", log=None):
                   f"edge: " + ", ".join(f"epoch {int(e)} ({d * 24:.1f} h)"
                                         for e, d in zip(dtc["epoch"][near],
                                                         d_edge[near])))
-        if (~near).sum() >= 2:
-            dx = depth_diagnostics(dtc[~near])
-            _log(log, f"  without them ({int((~near).sum())} transits): "
-                      + (f"constant-depth chi2/dof = {dx['chi2_red']:.2f}"
-                         if "chi2_red" in dx else "")
-                      + (f", odd/even difference = {dx['odd_even_sigma']:.2f} sigma"
-                         if "odd_even_sigma" in dx else ""))
-            _summary(cfg).update(
-                edge_transit_epochs=[int(e) for e in dtc["epoch"][near]],
-                depth_chi2_red_excl_edge=float(dx.get("chi2_red", np.nan)),
-                odd_even_sigma_excl_edge=float(dx.get("odd_even_sigma", np.nan)))
+    # transits that lost much of their in-transit data (gaps inside a
+    # segment, or the masked transits of another planet landing on them):
+    # the per-transit fit then rests on a fragment and its free mid-time can
+    # wander onto noise
+    low = np.zeros(near.shape, bool)
+    if dur is not None and np.isfinite(dur) and dur > 0:
+        cov = transit_coverage([sd.time for sd in sectors_data], dtc["Tc"], dur)
+        low = cov < cfg.min_transit_coverage
+        if low.any():
+            _log(log, f"  transits with under {cfg.min_transit_coverage:.0%} of "
+                      f"their in-transit cadences (gaps, or masked transits of "
+                      f"other planets): " + ", ".join(
+                          f"epoch {int(e)} ({c:.0%})"
+                          for e, c in zip(dtc["epoch"][low], cov[low])))
+    flag = near | low
+    # the *_excl_edge keys hold the tests without every flagged transit
+    # (edge or low coverage); the two epoch lists say which were left out
+    if flag.any() and (~flag).sum() >= 2:
+        dx = depth_diagnostics(dtc[~flag])
+        _log(log, f"  without them ({int((~flag).sum())} transits): "
+                  + (f"constant-depth chi2/dof = {dx['chi2_red']:.2f}"
+                     if "chi2_red" in dx else "")
+                  + (f", odd/even difference = {dx['odd_even_sigma']:.2f} sigma"
+                     if "odd_even_sigma" in dx else ""))
+        _summary(cfg).update(
+            edge_transit_epochs=[int(e) for e in dtc["epoch"][near]],
+            low_coverage_epochs=[int(e) for e in dtc["epoch"][low]],
+            depth_chi2_red_excl_edge=float(dx.get("chi2_red", np.nan)),
+            odd_even_sigma_excl_edge=float(dx.get("odd_even_sigma", np.nan)))
     _summary(cfg).update(
         depth_on_target_ppm=float(diag.get("depth", np.nan) * 1e6),
         depth_chi2_red=float(diag.get("chi2_red", np.nan)),
@@ -8360,7 +8408,7 @@ def main(cfg: Config):
         except Exception as exc:
             _log(log, f"  ! per-transit LD fits failed: {exc}")
     try:
-        report_depths_per_sector(dt_final, sectors_data, cfg, log=log)
+        report_depths_per_sector(dt_final, sectors_data, cfg, log=log, dur=dur)
     except Exception as exc:
         _log(log, f"  ! per-sector depth report failed: {exc}")
     # ---- 7d. ground-based light curves: fits and mid-times ----------------

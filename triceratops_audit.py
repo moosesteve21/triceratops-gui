@@ -365,6 +365,15 @@ def _centroid_stars(run: Run, sectors, max_sigma):
     return sorted(out, key=lambda h: float(h["Tmag"]) if h["Tmag"] != "?" else 99.0)
 
 
+def _flagged_transits(run: Run) -> str:
+    """Which transits the *_excl_edge tests leave out, as text ('' if none):
+    those next to a data gap and those with too little in-transit data."""
+    edge, low = run.S("edge_transit_epochs") or [], run.S("low_coverage_epochs") or []
+    parts = ([f"next to a data gap (epochs {edge})"] if edge else []) + \
+            ([f"with too little in-transit data (epochs {low})"] if low else [])
+    return " or ".join(parts)
+
+
 def _centroid_combined(run: Run, vals, T: dict):
     """Combine the sectors' centroid offsets.
 
@@ -496,13 +505,13 @@ def skeptic(run: Run, A: Audit, T: dict):
     else:
         st = "FAIL" if c > T["depth_chi2_fail"] else "WARN" if c > T["depth_chi2_warn"] else "PASS"
         txt, adv = f"chi2/dof = {c:.2f}", ""
-        cx, edge = run.S("depth_chi2_red_excl_edge"), run.S("edge_transit_epochs")
-        if st != "PASS" and cx is not None and edge:
-            txt += f"; {cx:.2f} without the transit(s) next to a data gap (epochs {edge})"
+        cx, flagged = run.S("depth_chi2_red_excl_edge"), _flagged_transits(run)
+        if st != "PASS" and cx is not None and flagged:
+            txt += f"; {cx:.2f} without the transit(s) {flagged}"
             if st == "FAIL" and cx <= T["depth_chi2_fail"]:
                 # not downgraded: a transit next to a gap can be as real as
                 # any other (e.g. an absent odd transit when the period is 2P)
-                adv = ("the failure rests on transits next to a data gap; inspect "
+                adv = ("the failure rests on the flagged transits; inspect "
                        "them before discarding them")
         A.test("Depth consistency", "Are the transits equally deep?", st, txt, src, adv)
 
@@ -518,11 +527,11 @@ def skeptic(run: Run, A: Audit, T: dict):
     else:
         st = "FAIL" if oe > T["odd_even_fail"] else "WARN" if oe > T["odd_even_warn"] else "PASS"
         txt, adv = f"{oe:.2f} sigma", ""
-        ox, edge = run.S("odd_even_sigma_excl_edge"), run.S("edge_transit_epochs")
-        if st != "PASS" and ox is not None and edge:
-            txt += f"; {ox:.2f} sigma without the transit(s) next to a data gap (epochs {edge})"
+        ox, flagged = run.S("odd_even_sigma_excl_edge"), _flagged_transits(run)
+        if st != "PASS" and ox is not None and flagged:
+            txt += f"; {ox:.2f} sigma without the transit(s) {flagged}"
             if st == "FAIL" and ox <= T["odd_even_fail"]:
-                adv = ("the failure rests on transits next to a data gap; inspect "
+                adv = ("the failure rests on the flagged transits; inspect "
                        "them before discarding them")
         mp = run.S("missing_parity")
         if st != "PASS" and mp in ("odd", "even"):

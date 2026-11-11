@@ -258,6 +258,39 @@ def test_transit_edge_distance():
     assert np.allclose(d, [0.2, 5.0, 0.19, 0.2, 0.0], atol=0.02)
 
 
+def test_transit_coverage():
+    cad = 200 / 86400
+    t = np.arange(100.0, 120.0, cad)
+    dur = 2.25 / 24
+    # a 1.86 h block masked on the transit at 105 (another planet's transit)
+    t = t[np.abs(t - 105.0) > 0.75 * 1.24 / 24]
+    cov = tv.transit_coverage([t, np.arange(130.0, 140.0, 0.5 / 24)],
+                              [103.0, 105.0, 105.8, 125.0, 135.0], dur)
+    assert cov[0] > 0.97 and cov[2] > 0.97 and cov[4] > 0.97   # 30-min sector too
+    assert 0.1 < cov[1] < 0.25 and cov[3] == 0.0
+
+
+def test_low_coverage_transits_are_flagged_and_left_out(tmp_path):
+    P, T0, dur, cad = 5.0, 100.0, 2.25 / 24, 200 / 86400
+    t = np.arange(98.0, 151.0, cad)
+    t = t[np.abs(t - (T0 + 4 * P)) > 0.07]                    # epoch 4 mostly masked
+    sd = SimpleNamespace(sector=1, time=t, g_target=1.0, aperture_kind="optimal")
+    depths = [1.0e-3] * 10
+    depths[4] = -0.6e-3                                       # the broken fit
+    dt = np.array([(e, T0 + e * P, d, 1e-4, 100, 1.0, 0.0, 1e-3, d / 1e-4, 50.0)
+                   for e, d in enumerate(depths)], dtype=tv._PT_DTYPE)
+    cfg = _cfg(tmp_path, _dilution_applied=True)
+    tv.report_depths_per_sector(dt, [sd], cfg, dur=dur)
+    s = tv._summary(cfg)
+    assert s["low_coverage_epochs"] == [4] and s["edge_transit_epochs"] == []
+    assert s["odd_even_sigma"] > 5 and s["odd_even_sigma_excl_edge"] < 0.1
+    assert s["depth_chi2_red_excl_edge"] < 0.1
+    # without a duration nothing is judged on coverage
+    cfg2 = _cfg(tmp_path, _dilution_applied=True)
+    tv.report_depths_per_sector(dt, [sd], cfg2)
+    assert "low_coverage_epochs" not in tv._summary(cfg2)
+
+
 def test_grid_finds_shallow_transit(tmp_path):
     t = _times(cad_min=3.33)
     P, T0, dep = 50.123, 1700.40, 1500e-6
