@@ -123,6 +123,12 @@ def test_refine_from_transits_needs_full_baseline(tmp_path):
     assert r["updated"] is True
 
 
+def test_transit_edge_distance():
+    t = np.concatenate([np.arange(100.0, 110.0, 0.01), np.arange(110.5, 120.0, 0.01)])
+    d = tv.transit_edge_distance(t, [100.2, 105.0, 109.8, 110.7, 130.0])
+    assert np.allclose(d, [0.2, 5.0, 0.19, 0.2, 0.0], atol=0.02)
+
+
 def test_grid_finds_shallow_transit(tmp_path):
     t = _times(cad_min=3.33)
     P, T0, dep = 50.123, 1700.40, 1500e-6

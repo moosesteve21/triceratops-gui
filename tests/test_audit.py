@@ -16,7 +16,8 @@ TIC = 999000001
 P, T0, T14_H, DEPTH = 12.3456, 2000.0, 4.0, 4000.0
 
 
-def _make_folder(tmp, depth_ppm=DEPTH, weak_sector=None, log_extra=""):
+def _make_folder(tmp, depth_ppm=DEPTH, weak_sector=None, log_extra="",
+                 summary_extra=None, period=P):
     rng = np.random.default_rng(3)
     dur = T14_H / 24
     for k, s in enumerate((10, 11, 12, 37, 38)):
@@ -29,11 +30,11 @@ def _make_folder(tmp, depth_ppm=DEPTH, weak_sector=None, log_extra=""):
         f[np.abs(ph) < dur / 2] -= d
         np.savetxt(os.path.join(tmp, f"lc_corrected_{TIC}_s{s}.txt"), np.c_[t, f, np.full(t.size, 6e-4)])
     log = (f"triceratops_validation.py v4.1.1\n"
-           f"Adopted ephemeris: P = {P} d, T0 = {T0}, T14 = {T14_H} h, depth = {depth_ppm:.0f} ppm\n"
+           f"Adopted ephemeris: P = {period} d, T0 = {T0}, T14 = {T14_H} h, depth = {depth_ppm:.0f} ppm\n"
            + log_extra)
     open(os.path.join(tmp, f"triceratops_output_TIC{TIC}.txt"), "w").write(log)
-    json.dump({"tic": TIC, "P_d": P, "T0_BTJD": T0, "T14_h": T14_H,
-               "depth_ppm_adopted": depth_ppm},
+    json.dump({"tic": TIC, "P_d": period, "T0_BTJD": T0, "T14_h": T14_H,
+               "depth_ppm_adopted": depth_ppm, **(summary_extra or {})},
               open(os.path.join(tmp, f"summary_{TIC}.json"), "w"))
     return tmp
 
@@ -80,6 +81,20 @@ def test_threshold_override(tmp_path):
     folder = _make_folder(str(tmp_path))
     A = ta.run_audit(folder, thresholds={"bls_period_tol": 1e-9}, recompute_lc=False)
     assert A.thresholds["bls_period_tol"] == 1e-9
+
+
+def test_failure_carried_by_edge_transits_is_a_warning(tmp_path):
+    extra = dict(depth_chi2_red=9.5, depth_chi2_red_excl_edge=1.2,
+                 odd_even_sigma=6.5, odd_even_sigma_excl_edge=0.8,
+                 edge_transit_epochs=[57])
+    A = ta.run_audit(_make_folder(str(tmp_path), summary_extra=extra), recompute_lc=False)
+    T = _tests(A)
+    for area in ("Depth consistency", "Odd/even"):
+        assert T[area].status == "WARN" and "data gap" in T[area].evidence, T[area].evidence
+    extra.update(depth_chi2_red_excl_edge=9.0, odd_even_sigma_excl_edge=6.0)
+    A = ta.run_audit(_make_folder(str(tmp_path), summary_extra=extra), recompute_lc=False)
+    assert _tests(A)["Depth consistency"].status == "FAIL"
+    assert _tests(A)["Odd/even"].status == "FAIL"
 
 
 def test_audit_never_changes_inputs(tmp_path):

@@ -427,8 +427,14 @@ def skeptic(run: Run, A: Audit, T: dict):
         A.test("Depth consistency", "Are the transits equally deep?", "NA", "not reported", src)
     else:
         st = "FAIL" if c > T["depth_chi2_fail"] else "WARN" if c > T["depth_chi2_warn"] else "PASS"
-        A.test("Depth consistency", "Are the transits equally deep?", st,
-               f"chi2/dof = {c:.2f}", src)
+        txt, adv = f"chi2/dof = {c:.2f}", ""
+        cx, edge = run.S("depth_chi2_red_excl_edge"), run.S("edge_transit_epochs")
+        if st != "PASS" and cx is not None and edge:
+            txt += f"; {cx:.2f} without the transit(s) next to a data gap (epochs {edge})"
+            if st == "FAIL" and cx <= T["depth_chi2_fail"]:
+                st = "WARN"
+                adv = "the failure rests on transits next to a data gap; inspect them"
+        A.test("Depth consistency", "Are the transits equally deep?", st, txt, src, adv)
 
     # 5. odd/even
     oe = run.S("odd_even_sigma")
@@ -441,7 +447,14 @@ def skeptic(run: Run, A: Audit, T: dict):
         A.test("Odd/even", "Could the true period be 2P?", "NA", "not reported", src)
     else:
         st = "FAIL" if oe > T["odd_even_fail"] else "WARN" if oe > T["odd_even_warn"] else "PASS"
-        A.test("Odd/even", "Could the true period be 2P?", st, f"{oe:.2f} sigma", src)
+        txt, adv = f"{oe:.2f} sigma", ""
+        ox, edge = run.S("odd_even_sigma_excl_edge"), run.S("edge_transit_epochs")
+        if st != "PASS" and ox is not None and edge:
+            txt += f"; {ox:.2f} sigma without the transit(s) next to a data gap (epochs {edge})"
+            if st == "FAIL" and ox <= T["odd_even_fail"]:
+                st = "WARN"
+                adv = "the failure rests on transits next to a data gap; inspect them"
+        A.test("Odd/even", "Could the true period be 2P?", st, txt, src, adv)
 
     # 6. secondary
     s = run.S("secondary")

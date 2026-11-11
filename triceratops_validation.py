@@ -494,6 +494,9 @@ class Config:
     # cluster of transits (e.g. two adjacent sectors) is otherwise
     # extrapolated over the whole baseline.
     ephem_adopt_max_sigma: float = 0.25
+    # Transits closer than this [d] to a data-segment edge are flagged and the
+    # depth and odd/even tests are also reported without them.
+    edge_transit_d: float = 0.5
     # The LD fit may overwrite the adopted depth / T14 only if its T0 shift
     # is below this fraction of T14 (a larger shift means the fold is smeared).
     ld_update_max_t0shift: float = 0.15
@@ -2313,6 +2316,25 @@ def segment_edge_distance(time, gap: float = 0.5):
     return out
 
 
+def transit_edge_distance(time, tcs, gap: float = 0.5):
+    """Distance [d] of each mid-time to the nearest edge of the data segment
+    that contains it (a segment ends at any gap longer than *gap* days);
+    0 for a mid-time outside the data."""
+    t = np.asarray(time, float)
+    ts = np.sort(t[np.isfinite(t)])
+    if ts.size == 0:
+        return np.zeros(len(tcs))
+    br = np.where(np.diff(ts) > gap)[0]
+    starts = ts[np.concatenate([[0], br + 1])]
+    ends = ts[np.concatenate([br, [ts.size - 1]])]
+    out = []
+    for tc in np.asarray(tcs, float):
+        k = int(np.searchsorted(starts, tc, side="right")) - 1
+        out.append(0.0 if k < 0 or tc > ends[k]
+                   else float(min(tc - starts[k], ends[k] - tc)))
+    return np.array(out)
+
+
 def candidate_edge_fraction(time, P, T0, dur, within: float = 0.5,
                             gap: float = 0.5):
     """Fraction of the in-transit cadences of a candidate that lie within
@@ -3469,6 +3491,29 @@ def report_depths_per_sector(dt, sectors_data, cfg: "Config", log=None):
         _log(log, "  ! depths inconsistent beyond their errors: residual "
                   "systematics, an imperfect PSF model of the neighbours, or "
                   "a real change of the eclipse (see the depth trend below)")
+    # transits next to a data-segment edge (orbit gaps, sector ends): the
+    # detrending is least reliable there, and with few transits a single
+    # one can decide the depth and odd/even tests
+    t_all = np.concatenate([np.asarray(sd.time, float) for sd in sectors_data
+                            if len(sd.time)])
+    d_edge = transit_edge_distance(t_all, dtc["Tc"])
+    near = d_edge < cfg.edge_transit_d
+    if near.any():
+        _log(log, f"  transits within {cfg.edge_transit_d:g} d of a data-segment "
+                  f"edge: " + ", ".join(f"epoch {int(e)} ({d * 24:.1f} h)"
+                                        for e, d in zip(dtc["epoch"][near],
+                                                        d_edge[near])))
+        if (~near).sum() >= 2:
+            dx = depth_diagnostics(dtc[~near])
+            _log(log, f"  without them ({int((~near).sum())} transits): "
+                      + (f"constant-depth chi2/dof = {dx['chi2_red']:.2f}"
+                         if "chi2_red" in dx else "")
+                      + (f", odd/even difference = {dx['odd_even_sigma']:.2f} sigma"
+                         if "odd_even_sigma" in dx else ""))
+            _summary(cfg).update(
+                edge_transit_epochs=[int(e) for e in dtc["epoch"][near]],
+                depth_chi2_red_excl_edge=float(dx.get("chi2_red", np.nan)),
+                odd_even_sigma_excl_edge=float(dx.get("odd_even_sigma", np.nan)))
     _summary(cfg).update(
         depth_on_target_ppm=float(diag.get("depth", np.nan) * 1e6),
         depth_chi2_red=float(diag.get("chi2_red", np.nan)),
