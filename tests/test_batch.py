@@ -67,6 +67,16 @@ def test_load_batch_merges_defaults_profile_and_options(tmp_path):
     assert PARSER.parse_args(j2["args"]).ephem_search == "scan"
 
 
+def test_load_batch_allows_notes_and_reports_unknown_keys(tmp_path):
+    batch = _write(tmp_path / "b.json", {
+        "notes": "round 3", "candidates": [
+            {"tic": 1, "notes": "2P alias of an earlier candidate"},
+            {"tic": 2, "optoins": {"ld_fit": True}}]})
+    b = tb.load_batch(batch, PARSER)
+    assert b["jobs"][0]["notes"] == "2P alias of an earlier candidate"
+    assert len(b["warnings"]) == 1 and "optoins" in b["warnings"][0]
+
+
 def test_load_batch_rejects_duplicate_labels(tmp_path):
     batch = _write(tmp_path / "b.json", {"candidates": [{"tic": 1}, {"tic": 1}]})
     with pytest.raises(ValueError, match="used twice"):

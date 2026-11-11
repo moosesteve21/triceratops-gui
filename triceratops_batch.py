@@ -44,10 +44,15 @@ Batch file (paths relative to the current directory):
     }
 
 Options use the names in the profiles (the script's argument names with
-underscores).  For each candidate: defaults < profile < options; "tic" may
-also sit on the candidate itself.  label defaults to TIC<tic>; outdir
-defaults to <results_dir>/<name>/<label>.  outdir, download_dir and
-prefetch_only are set by this script.
+underscores); values may be numbers or strings, lists for multi-value
+options (ephemeris: P T0 depth_ppm T14_h; mask_ephemeris: P T0 T14_h per
+planet).  For each candidate: defaults < profile < options; "tic" may also
+sit on the candidate itself.  label defaults to TIC<tic>; outdir defaults to
+<results_dir>/<name>/<label>.  outdir, download_dir and prefetch_only are
+set by this script (a profile's own outdir is ignored).  "notes" (or
+"description") may be added to the file and to any candidate; they are
+not used.  Other unknown keys are reported, since a misspelt "options"
+would otherwise drop a candidate's settings silently.
 """
 from __future__ import annotations
 
@@ -68,6 +73,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.path.join(HERE, "triceratops_validation.py")
 AUDIT = os.path.join(HERE, "triceratops_audit.py")
 MANAGED = ("outdir", "download_dir", "prefetch_only")
+BATCH_KEYS = {"name", "results_dir", "cache_dir", "workers", "audit", "defaults",
+              "candidates", "notes", "description"}
+CANDIDATE_KEYS = {"label", "tic", "profile", "options", "outdir", "notes", "description"}
 
 
 # --------------------------------------------------------------------------
@@ -134,9 +142,17 @@ def load_batch(path: str, parser) -> dict:
     root = os.path.abspath(os.path.join(spec.get("results_dir", "results"), name))
     cache = os.path.abspath(spec.get("cache_dir") or os.path.join(root, "tesscut_cache"))
     defaults = dict(spec.get("defaults") or {})
+    warnings = []
+    extra = sorted(set(spec) - BATCH_KEYS)
+    if extra:
+        warnings.append(f"batch file: unknown key(s) {', '.join(extra)} ignored")
     jobs, seen = [], set()
     for i, c in enumerate(spec.get("candidates") or []):
         where = f"candidate {i + 1}"
+        extra = sorted(set(c) - CANDIDATE_KEYS)
+        if extra:
+            warnings.append(f"{where} ({c.get('label', '?')}): unknown key(s) "
+                            f"{', '.join(extra)} ignored (options go inside \"options\")")
         opts = dict(defaults)
         ground = []
         if c.get("profile"):
@@ -162,10 +178,10 @@ def load_batch(path: str, parser) -> dict:
             args += ["--ground-lc", str(g)]
         outdir = os.path.abspath(c.get("outdir") or os.path.join(root, label))
         jobs.append(dict(label=label, tic=int(opts["tic"]), args=args, outdir=outdir,
-                         dropped=dropped))
+                         dropped=dropped, notes=c.get("notes") or c.get("description")))
     if not jobs:
         raise ValueError("the batch file has no candidates")
-    return dict(name=name, root=root, cache=cache, jobs=jobs,
+    return dict(name=name, root=root, cache=cache, jobs=jobs, warnings=warnings,
                 workers=int(spec.get("workers", 3)), audit=bool(spec.get("audit", True)))
 
 
@@ -498,6 +514,8 @@ def build_parser():
 def main(argv=None):
     a = build_parser().parse_args(argv)
     batch = load_batch(a.batch, load_parser())
+    for w in batch["warnings"]:
+        print(f"! {w}")
     jobs = batch["jobs"]
     if a.only:
         want = set(a.only)
