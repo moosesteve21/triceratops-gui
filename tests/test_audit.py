@@ -90,17 +90,21 @@ def test_threshold_override(tmp_path):
     assert A.thresholds["bls_drift_tol"] == 1e-9
 
 
-def test_failure_carried_by_edge_transits_is_a_warning(tmp_path):
+def test_failure_carried_by_edge_transits_stays_a_failure(tmp_path):
+    # the edge transits are named and the tests reported without them, but a
+    # transit next to a gap can be real, so the FAIL is not downgraded
     extra = dict(depth_chi2_red=9.5, depth_chi2_red_excl_edge=1.2,
                  odd_even_sigma=6.5, odd_even_sigma_excl_edge=0.8,
                  edge_transit_epochs=[57])
     A = ta.run_audit(_make_folder(str(tmp_path), summary_extra=extra), recompute_lc=False)
     T = _tests(A)
     for area in ("Depth consistency", "Odd/even"):
-        assert T[area].status == "WARN" and "data gap" in T[area].evidence, T[area].evidence
+        t = T[area]
+        assert t.status == "FAIL" and "data gap" in t.evidence, t.evidence
+        assert "inspect" in t.advice, t.advice
     extra.update(depth_chi2_red_excl_edge=9.0, odd_even_sigma_excl_edge=6.0)
     A = ta.run_audit(_make_folder(str(tmp_path), summary_extra=extra), recompute_lc=False)
-    assert _tests(A)["Depth consistency"].status == "FAIL"
+    assert _tests(A)["Depth consistency"].advice == ""
     assert _tests(A)["Odd/even"].status == "FAIL"
 
 

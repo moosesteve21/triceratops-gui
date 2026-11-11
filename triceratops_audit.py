@@ -458,8 +458,10 @@ def skeptic(run: Run, A: Audit, T: dict):
         if st != "PASS" and cx is not None and edge:
             txt += f"; {cx:.2f} without the transit(s) next to a data gap (epochs {edge})"
             if st == "FAIL" and cx <= T["depth_chi2_fail"]:
-                st = "WARN"
-                adv = "the failure rests on transits next to a data gap; inspect them"
+                # not downgraded: a transit next to a gap can be as real as
+                # any other (e.g. an absent odd transit when the period is 2P)
+                adv = ("the failure rests on transits next to a data gap; inspect "
+                       "them before discarding them")
         A.test("Depth consistency", "Are the transits equally deep?", st, txt, src, adv)
 
     # 5. odd/even
@@ -478,8 +480,8 @@ def skeptic(run: Run, A: Audit, T: dict):
         if st != "PASS" and ox is not None and edge:
             txt += f"; {ox:.2f} sigma without the transit(s) next to a data gap (epochs {edge})"
             if st == "FAIL" and ox <= T["odd_even_fail"]:
-                st = "WARN"
-                adv = "the failure rests on transits next to a data gap; inspect them"
+                adv = ("the failure rests on transits next to a data gap; inspect "
+                       "them before discarding them")
         A.test("Odd/even", "Could the true period be 2P?", st, txt, src, adv)
 
     # 6. secondary
