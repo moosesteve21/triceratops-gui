@@ -133,6 +133,12 @@ def test_centroid_names_the_star_it_points_to(tmp_path):
     T = _tests(ta.run_audit(folder, recompute_lc=False))
     assert "TIC 111 (T = 9.80" in T["Centroids"].evidence and "TIC 222" not in T["Centroids"].evidence
     assert T["Neighbours"].status == "WARN" and "TIC 111" in T["Neighbours"].evidence
+    # a marginal offset (WARN, median < 3 sigma) names no stars
+    with open(os.path.join(folder, f"difference_imaging_{TIC}.csv"), "w") as fh:
+        fh.write("sector,snr,offset_direct_sigma\n17,6.0,0.6\n24,30.0,3.4\n")
+    T = _tests(ta.run_audit(folder, recompute_lc=False))
+    assert T["Centroids"].status == "WARN" and "consistent" not in T["Centroids"].evidence
+    assert T["Neighbours"].status == "PASS", T["Neighbours"].evidence
 
 
 def test_audit_never_changes_inputs(tmp_path):

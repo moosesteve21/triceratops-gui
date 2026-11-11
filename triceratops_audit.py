@@ -594,7 +594,9 @@ def skeptic(run: Run, A: Audit, T: dict):
             st = ("FAIL" if med > T["di_median_fail_sigma"] else "WARN" if hi else "PASS")
             txt = (f"median offset {med:.1f} sigma over {len(vals)} sectors ({key})"
                    + (f"; > {T['di_sector_warn_sigma']:g} sigma in {', '.join(hi)}" if hi else ""))
-            if st != "PASS":
+            # only when the offset itself is significant: near the target
+            # many faint stars are "consistent" with a noisy centroid
+            if st == "FAIL":
                 di_hosts = _centroid_stars(run, [s for s, _ in vals], T["di_sector_warn_sigma"])
                 if di_hosts:
                     txt += ("; the centroid is consistent (< "
