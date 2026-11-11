@@ -105,7 +105,7 @@ TABS = [
         "outdir", "ephemeris", "blind_search", "p_min", "p_max",
         "ephem_search", "no_ephem_scan", "ephem_scan_hours", "ephem_grid_dp",
         "ephem_grid_min_snr", "no_refine_ephemeris", "refine_chi2_max",
-        "no_tc_fit"]),
+        "ephem_adopt_max_sigma", "no_tc_fit"]),
     ("Light curve", [
         "lc_source", "download_dir", "exclude_sectors", "no_auto_exclude_sectors",
         "sector_max_rms", "aperture", "dilution_mode", "raw_aperture_flux",
@@ -136,6 +136,7 @@ LABELS = {
     "ephem_grid_dp": "Grid half-range in P [d]",
     "ephem_grid_min_snr": "Grid min. S/N", "no_refine_ephemeris":
     "Do not refine P, T0 from transits", "refine_chi2_max": "Refine: max chi2_red",
+    "ephem_adopt_max_sigma": "Refine: max prediction error [T14]",
     "no_tc_fit": "Fixed mid-times in per-transit fits",
     "lc_source": "Light-curve source", "download_dir": "TESScut cache folder",
     "exclude_sectors": "Exclude sectors", "no_auto_exclude_sectors":
