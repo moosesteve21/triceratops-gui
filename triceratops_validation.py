@@ -3506,6 +3506,19 @@ def report_depths_per_sector(dt, sectors_data, cfg: "Config", log=None):
             _log(log, f"  cadence {key:5.1f} min: odd {mo * 1e6:7.0f} +/- "
                       f"{eo * 1e6:5.0f} ppm ({odd.size}), even {me * 1e6:7.0f} "
                       f"+/- {ee * 1e6:5.0f} ppm ({even.size}): {zs:+.2f} sigma")
+    mp = missing_parity(diag)
+    if mp:
+        other = "even" if mp == "odd" else "odd"
+        P_now = _summary(cfg).get("P_d")
+        P2 = (f"2P = {2 * float(P_now):.6f} d" if P_now is not None
+              else "twice the period")
+        _log(log, f"  ! no transit at the {mp} epochs ({mp} depth "
+                  f"{diag[f'depth_{mp}'] * 1e6:.0f} +/- "
+                  f"{diag[f'depth_{mp}_err'] * 1e6:.0f} ppm, {other} "
+                  f"{diag[f'depth_{other}'] * 1e6:.0f} +/- "
+                  f"{diag[f'depth_{other}_err'] * 1e6:.0f} ppm): the period is "
+                  f"probably {P2}; rerun with that period")
+        _summary(cfg).update(missing_parity=mp)
     if "chi2_red" in diag and diag["chi2_red"] > 5:
         _log(log, "  ! depths inconsistent beyond their errors: residual "
                   "systematics, an imperfect PSF model of the neighbours, or "
@@ -3537,6 +3550,10 @@ def report_depths_per_sector(dt, sectors_data, cfg: "Config", log=None):
         depth_on_target_ppm=float(diag.get("depth", np.nan) * 1e6),
         depth_chi2_red=float(diag.get("chi2_red", np.nan)),
         odd_even_sigma=float(diag.get("odd_even_sigma", np.nan)),
+        depth_odd_ppm=float(diag.get("depth_odd", np.nan) * 1e6),
+        depth_odd_err_ppm=float(diag.get("depth_odd_err", np.nan) * 1e6),
+        depth_even_ppm=float(diag.get("depth_even", np.nan) * 1e6),
+        depth_even_err_ppm=float(diag.get("depth_even_err", np.nan) * 1e6),
         g_target_range=[float(np.nanmin([x[5] for x in rows])),
                         float(np.nanmax([x[5] for x in rows]))])
     return out
@@ -3862,10 +3879,33 @@ def depth_diagnostics(dt: np.ndarray) -> dict:
     if odd.sum() >= 1 and even.sum() >= 1:
         d_odd = float(np.sum(w[odd] * d[odd]) / np.sum(w[odd]))
         d_even = float(np.sum(w[even] * d[even]) / np.sum(w[even]))
-        sig = float(np.sqrt(1.0 / np.sum(w[odd]) + 1.0 / np.sum(w[even])))
+        e_odd = float(1.0 / np.sqrt(np.sum(w[odd])))
+        e_even = float(1.0 / np.sqrt(np.sum(w[even])))
+        sig = float(np.hypot(e_odd, e_even))
         out.update(depth_odd=d_odd, depth_even=d_even,
+                   depth_odd_err=e_odd, depth_even_err=e_even,
                    odd_even_sigma=abs(d_odd - d_even) / sig)
     return out
+
+
+def missing_parity(diag: dict, zero_sigma: float = 2.0,
+                   detect_sigma: float = 3.0) -> Optional[str]:
+    """'odd' or 'even' when the transits of that parity are absent.
+
+    Absent: that parity's mean depth is within zero_sigma of zero (or
+    negative), while the other parity is detected at > detect_sigma and the
+    two differ by > detect_sigma.  The period is then probably 2P (a planet
+    or an EB at 2P), not an EB at P with unequal eclipses.
+    """
+    if "depth_odd_err" not in diag:
+        return None
+    for name, other in (("odd", "even"), ("even", "odd")):
+        d, e = diag[f"depth_{name}"], diag[f"depth_{name}_err"]
+        do, eo = diag[f"depth_{other}"], diag[f"depth_{other}_err"]
+        if (d < zero_sigma * e and do > detect_sigma * eo
+                and (do - d) / np.hypot(e, eo) > detect_sigma):
+            return name
+    return None
 
 
 def _planck_ratio_temperature(ratio, teff_star, lam_um=0.80):

@@ -482,6 +482,17 @@ def skeptic(run: Run, A: Audit, T: dict):
             if st == "FAIL" and ox <= T["odd_even_fail"]:
                 adv = ("the failure rests on transits next to a data gap; inspect "
                        "them before discarding them")
+        mp = run.S("missing_parity")
+        if st != "PASS" and mp in ("odd", "even"):
+            other = "even" if mp == "odd" else "odd"
+            d, e = run.S(f"depth_{mp}_ppm"), run.S(f"depth_{mp}_err_ppm")
+            do, eo = run.S(f"depth_{other}_ppm"), run.S(f"depth_{other}_err_ppm")
+            if None not in (d, e, do, eo):
+                txt += (f"; no transit at the {mp} epochs ({mp} {d:.0f} +/- {e:.0f} ppm, "
+                        f"{other} {do:.0f} +/- {eo:.0f} ppm)")
+            P = run.S("P_d")
+            adv = (f"rerun at 2P = {2 * P:.6f} d" if P else "rerun at twice the period") \
+                + (f"; {adv}" if adv else "")
         A.test("Odd/even", "Could the true period be 2P?", st, txt, src, adv)
 
     # 6. secondary

@@ -302,6 +302,23 @@ def test_etv_significance_scaled_when_errors_underestimated(tmp_path):
     assert out["ltte_dchi2"] < 15 and out["dchi2_quad"] < 9
 
 
+def test_missing_parity_points_to_2p():
+    def diag(depths):
+        dt = np.array([(e, T0_TRUE + e * 3.0, d, 2.5e-4, 40, 1.0, 0.0, 0.003, d / 2.5e-4, 0.0)
+                       for e, d in depths], dtype=tv._PT_DTYPE)
+        return tv.depth_diagnostics(dt)
+    # every transit at even epochs, none at the two odd ones: period is 2P
+    d = diag([(0, 1.1e-3), (2, 0.9e-3), (102, 1.2e-3), (103, -0.4e-3),
+              (104, 1.0e-3), (351, 0.1e-3), (352, 0.95e-3)])
+    assert tv.missing_parity(d) == "odd"
+    # an EB at P with a shallower but detected secondary: not "absent"
+    d = diag([(0, 1.1e-3), (1, 0.6e-3), (2, 1.0e-3), (3, 0.55e-3), (4, 1.05e-3)])
+    assert tv.missing_parity(d) is None
+    # equal depths
+    d = diag([(e, 1.0e-3) for e in range(6)])
+    assert tv.missing_parity(d) is None
+
+
 # ------------------------------------------------------------ helpers
 def test_exptime_kwargs_and_effective_exposure(tmp_path):
     cfg = _cfg(tmp_path)

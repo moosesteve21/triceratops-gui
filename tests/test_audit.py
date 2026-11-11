@@ -108,6 +108,16 @@ def test_failure_carried_by_edge_transits_stays_a_failure(tmp_path):
     assert _tests(A)["Odd/even"].status == "FAIL"
 
 
+def test_absent_odd_transits_advise_2p(tmp_path):
+    extra = dict(odd_even_sigma=5.5, missing_parity="odd", P_d=6.5,
+                 depth_odd_ppm=-120.0, depth_odd_err_ppm=180.0,
+                 depth_even_ppm=1050.0, depth_even_err_ppm=110.0)
+    A = ta.run_audit(_make_folder(str(tmp_path), summary_extra=extra), recompute_lc=False)
+    t = _tests(A)["Odd/even"]
+    assert t.status == "FAIL" and "no transit at the odd epochs" in t.evidence, t.evidence
+    assert "2P = 13.000000 d" in t.advice, t.advice
+
+
 def test_density_with_unconstrained_b(tmp_path):
     def shape(rho_fit, rho_cat):
         log = (f"  b    = 0.10000 +/- 40.00000\n"
