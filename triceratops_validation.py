@@ -5378,6 +5378,37 @@ def _mad_sigma(x) -> float:
     return float(1.4826 * np.median(np.abs(x - np.median(x))))
 
 
+def fold_core_depth(tp, fp, dur):
+    """Depth at the centre of the fold and its uncertainty, from the unbinned
+    points: 1 - median(flux within 0.25 T14 of mid-transit) / median(flux
+    beyond 0.75 T14). The error is that of a median, from the out-of-transit
+    scatter. Unlike the lowest few bins, this is not pulled deep by noise on
+    a shallow transit. Returns (nan, nan) when there are too few points."""
+    tp, fp = np.asarray(tp, float), np.asarray(fp, float)
+    ok = np.isfinite(tp) & np.isfinite(fp)
+    core = ok & (np.abs(tp) < 0.25 * dur)
+    oot = ok & (np.abs(tp) > 0.75 * dur)
+    if core.sum() < 5 or oot.sum() < 10:
+        return float("nan"), float("nan")
+    base = float(np.median(fp[oot]))
+    if not np.isfinite(base) or base <= 0:
+        return float("nan"), float("nan")
+    d = 1.0 - float(np.median(fp[core])) / base
+    sig = 1.2533 * _mad_sigma(fp[oot] / base) / np.sqrt(core.sum())
+    return d, float(sig)
+
+
+def depth_mismatch(depth, tp, fp, dur, frac=0.3, nsig=3.0):
+    """Does the depth given for TRICERATOPS disagree with the fold? Only when
+    it differs from the core depth by more than frac of the larger AND by
+    more than nsig standard errors. Returns (mismatch, core depth, error)."""
+    d, s = fold_core_depth(tp, fp, dur)
+    if not (np.isfinite(d) and np.isfinite(s) and d > 0):
+        return False, d, s
+    diff = abs(depth - d)
+    return bool(diff > frac * max(depth, d) and diff > nsig * s), d, s
+
+
 def triceratops_flux_error(tp, fp, lc, dur, P, cfg: Config,
                            ref_model=None, ref_npar=4):
     """One realistic flux uncertainty for calc_probs.
@@ -8370,17 +8401,14 @@ def main(cfg: Config):
     cfg._tri_exptime = float(et) if et and et > 0 else None
     if cfg.use_known_ephemeris and cfg.depth_known > 0:
         try:
-            _ph = np.asarray(getattr(lc.time, "value", lc.time), float)
-            d_fold = 1.0 - float(np.nanmedian(np.sort(
-                np.asarray(lc.flux.value, float)[np.abs(_ph) < 0.25 * dur])[:3]))
+            bad, d_fold, s_fold = depth_mismatch(depth, tp, fp, dur)
         except Exception:
-            d_fold = float("nan")
-        if np.isfinite(d_fold) and d_fold > 0 and \
-                abs(depth - d_fold) > 0.3 * max(depth, d_fold):
+            bad, d_fold, s_fold = False, float("nan"), float("nan")
+        if bad:
             _log(log, f"  ! depth passed to TRICERATOPS ({depth * 1e6:.0f} ppm) "
                       f"differs from the depth seen in this light curve "
-                      f"(~{d_fold * 1e6:.0f} ppm at the bottom of the binned "
-                      f"fold). Give the depth on the scale of this light "
+                      f"({d_fold * 1e6:.0f} +/- {s_fold * 1e6:.0f} ppm, median "
+                      f"of the transit core). Give the depth on the scale of this light "
                       f"curve: on-target (like SPOC PDCSAP) with the default "
                       f"per-sector dilution correction, the raw aperture "
                       f"depth with --dilution-mode none.")

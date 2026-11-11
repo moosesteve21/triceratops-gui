@@ -75,6 +75,29 @@ def test_clip_removes_upward_spikes():
     assert np.nanmax(out[1]) < 1.02
 
 
+# ------------------------------------------------------------- provenance
+def test_depth_check_is_not_fooled_by_noise_on_a_shallow_transit():
+    rng = np.random.default_rng(7)
+    dur = 2.7 / 24.0
+    tp = np.sort(rng.uniform(-0.28, 0.28, 1800))
+    fp = 1.0 - 700e-6 * (np.abs(tp) < 0.5 * dur) + rng.normal(0, 1000e-6, tp.size)
+    # the old estimate (median of the 3 lowest 10-min bins in the core) is
+    # biased deep by the noise
+    edges = np.arange(-0.28, 0.29, 10 / 1440)
+    i = np.digitize(tp, edges)
+    bt = np.array([tp[i == k].mean() for k in np.unique(i)])
+    bf = np.array([np.median(fp[i == k]) for k in np.unique(i)])
+    old = 1 - np.median(np.sort(bf[np.abs(bt) < 0.25 * dur])[:3])
+    assert old > 1.3 * 700e-6
+    bad, d, s = tv.depth_mismatch(700e-6, tp, fp, dur)
+    assert not bad and abs(d - 700e-6) < 3 * s and s < 150e-6
+    # a depth on the wrong scale (half the real one) is still caught
+    assert tv.depth_mismatch(350e-6, tp, fp, dur)[0]
+    # ... but not when the fold is too noisy to tell
+    noisy = 1.0 - 700e-6 * (np.abs(tp) < 0.5 * dur) + rng.normal(0, 6000e-6, tp.size)
+    assert not tv.depth_mismatch(350e-6, tp, noisy, dur)[0]
+
+
 # ------------------------------------------------------------- ephemeris
 def test_scan_recovers_drifting_ephemeris(tmp_path):
     t = _times()
