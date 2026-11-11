@@ -55,6 +55,7 @@ THRESHOLDS = {
     "odd_even_warn": 2.0,
     "odd_even_fail": 3.0,
     "density_ratio_warn": 1.5,        # transit vs catalogue stellar density
+    "b_fit_limit": 0.01,              # a fitted b below this sits at the b = 0 limit
     "g_range_warn": 0.05,
     "g_model_diff_warn": 0.02,
     "di_sector_warn_sigma": 3.0,
@@ -571,6 +572,9 @@ def skeptic(run: Run, A: Audit, T: dict):
     if L.get("grazing") or mg:
         issues.append(f"grazing (b + k = {mg.group(1)})" if mg else "grazing")
     b_free = bool(mb and float(mb.group(2)) > 1)
+    # a fit stuck at the b = 0 limit reports a meaningless, tiny error: its
+    # b is not constrained either, so the b range is searched as well
+    b_limit = bool(mb and float(mb.group(1)) < T["b_fit_limit"])
     if m and m2:
         rho0, rho_c = float(m.group(1)), float(m2.group(1))
         r = rho0 / rho_c
@@ -581,7 +585,7 @@ def skeptic(run: Run, A: Audit, T: dict):
             k = L.get("rp")
             b0 = L.get("b", float(mb.group(1)) if mb else None)
             b_match = None
-            if b_free and k is not None and b0 is not None:
+            if (b_free or b_limit) and k is not None and b0 is not None:
                 s2 = (1 + k) ** 2 - b0 ** 2
                 b2 = (1 + k) ** 2 - s2 * (rho_c / rho0) ** (2.0 / 3.0)
                 if 0.0 <= b2 < (1 + k) ** 2:

@@ -118,6 +118,18 @@ def test_absent_odd_transits_advise_2p(tmp_path):
     assert "2P = 13.000000 d" in t.advice, t.advice
 
 
+def test_density_with_b_at_the_fit_limit(tmp_path):
+    # a fit stuck at b = 0 reports a tiny formal error; b is not constrained
+    log = ("  b    = 0.00000 +/- 0.00007\n"
+           "  rho_star (circular orbit) = 25.0 g/cm^3\n"
+           "  rho_star from TIC mass/radius       = 2.5 g/cm^3   (consistency check)\n")
+    extra = {"ld_fit": {"rp": 0.0400, "b": 1.5e-6, "grazing": False, "T14_h": 1.5}}
+    A = ta.run_audit(_make_folder(str(tmp_path), log_extra=log, summary_extra=extra),
+                     recompute_lc=False)
+    t = _tests(A)["Shape"]
+    assert t.status == "PASS" and "b = 0.92" in t.evidence, t.evidence
+
+
 def test_density_with_unconstrained_b(tmp_path):
     def shape(rho_fit, rho_cat):
         log = (f"  b    = 0.10000 +/- 40.00000\n"
