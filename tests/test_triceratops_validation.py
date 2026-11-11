@@ -125,6 +125,32 @@ def test_scan_does_not_rescan_with_a_short_baseline_fit(tmp_path):
     assert fit["ok"] is False
 
 
+def test_prefetch_downloads_every_size_a_run_reads(tmp_path, monkeypatch):
+    import json
+    cfg = _cfg(tmp_path, exclude_sectors=[33])
+    assert tv.prefetch_cutout_sizes(cfg) == [10, 22]          # photometry, TRICERATOPS
+    cfg.vet_neighbours = True
+    assert tv.prefetch_cutout_sizes(cfg) == [10, 22, 23]      # + neighbour vetting
+    monkeypatch.setattr(tv, "find_tess_sectors", lambda tic, cfg=None: np.array([6, 33, 87]))
+    cached = {(6, 10)}
+    monkeypatch.setattr(tv, "_find_cached_tesscut",
+                        lambda root, s, size, tic, cfg: "x" if (s, size) in cached else None)
+    got = []
+
+    def fake_load(tic, s, size, cfg, **kw):
+        if (s, size) == (87, 23):
+            raise RuntimeError("MAST 502")
+        got.append((s, size))
+
+    monkeypatch.setattr(tv, "_load_tesscut_tpf", fake_load)
+    rec = tv.prefetch_tesscut(cfg)
+    assert got == [(6, 22), (6, 23), (87, 10), (87, 22)]     # sector 33 excluded
+    assert rec["cached"] == 1 and rec["downloaded"] == 4
+    assert rec["failed"] == [dict(sector=87, size=23, error="MAST 502")]
+    on_disk = json.load(open(cfg.path("prefetch_TIC1.json")))
+    assert on_disk["sectors"] == [6, 87] and on_disk["sizes"] == [10, 22, 23]
+
+
 def test_refine_from_transits_needs_full_baseline(tmp_path):
     cfg = _cfg(tmp_path)
     dur = 1.3 / 24

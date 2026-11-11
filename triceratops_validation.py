@@ -1477,6 +1477,65 @@ def _load_tesscut_tpf(tic: int, sector: int, cutout_size: int, cfg: Config,
     raise last_exc
 
 
+def prefetch_cutout_sizes(cfg: Config) -> list:
+    """Square TESScut sizes [px] a run with these settings requests per sector.
+
+    The photometry cutout (cfg.cutout_size), TRICERATOPS' own cutout
+    (N_pix = 2 * search_radius + 2 in triceratops.target) and, with
+    --vet-neighbours, the larger neighbour-vetting cutout.
+    """
+    sizes = {int(cfg.cutout_size), 2 * int(cfg.search_radius) + 2}
+    if cfg.vet_neighbours:
+        sizes.add(int(max(cfg.cutout_size, 2 * cfg.neighbour_max_sep / 21.0 + 4)))
+    return sorted(sizes)
+
+
+def prefetch_tesscut(cfg: Config) -> dict:
+    """Download every TESScut cutout a run with these settings would read; no analysis.
+
+    Fills cfg.cache_dir() (--download-dir) so that a later run with the same
+    target, sectors and options finds every cutout in the cache.  Catalogue
+    queries (TIC, Gaia, TRILEGAL) are not cached and still run at analysis
+    time.  Writes prefetch_TIC<tic>.json to the output folder and returns
+    the same record.
+    """
+    tic = cfg.tic
+    src = (getattr(cfg, "lc_source", "tesscut") or "tesscut").lower()
+    if is_kepler() or src != "tesscut":
+        raise SystemExit("--prefetch-only supports TESS runs with --lc-source "
+                         "tesscut only")
+    print(f"Prefetching TESScut cutouts for TIC {tic} into {cfg.cache_dir()}")
+    sectors = [int(s) for s in find_tess_sectors(tic, cfg=cfg)]
+    excl = {int(s) for s in (cfg.exclude_sectors or [])}
+    if excl:
+        print(f"  excluding sectors {sorted(excl & set(sectors))}")
+    sectors = [s for s in sectors if s not in excl]
+    sizes = prefetch_cutout_sizes(cfg)
+    print(f"  sectors {sectors}; cutout sizes {sizes} px")
+    rec = dict(tic=int(tic), cache_dir=cfg.cache_dir(), sectors=sectors,
+               sizes=sizes, cached=0, downloaded=0, failed=[])
+    for s in sectors:
+        for size in sizes:
+            hit = any(_find_cached_tesscut(root, s, size, tic=tic, cfg=cfg)
+                      for root in _tesscut_cache_dirs(cfg))
+            if hit:
+                rec["cached"] += 1
+                print(f"  sector {s:3d} size {size:2d}: already cached")
+                continue
+            try:
+                _load_tesscut_tpf(tic, s, size, cfg)
+                rec["downloaded"] += 1
+            except Exception as exc:
+                rec["failed"].append(dict(sector=s, size=size, error=str(exc)[:200]))
+                print(f"  ! sector {s} size {size}: {exc}")
+    print(f"  {rec['cached']} already cached, {rec['downloaded']} downloaded, "
+          f"{len(rec['failed'])} failed")
+    import json
+    with open(cfg.path(f"prefetch_TIC{tic}.json"), "w", encoding="utf-8") as fh:
+        json.dump(rec, fh, indent=2)
+    return rec
+
+
 @contextmanager
 def _triceratops_tesscut_cache(tic, cfg):
     """Route TRICERATOPS' internal TESS requests through the same cache.
@@ -8441,6 +8500,10 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--download-dir", type=str, default=None,
                     help="TESScut / SPOC cache directory (default: <outdir>/tesscut_cache). "
                          "Already-downloaded products are reused.")
+    ap.add_argument("--prefetch-only", action="store_true",
+                    help="Only download the TESScut cutouts this run would read "
+                         "(every sector, every cutout size) into the cache, then "
+                         "stop. Use with --download-dir to prepare runs in advance.")
     ap.add_argument("--lc-source", type=str, default="tesscut",
                     choices=("tesscut", "sap", "pdcsap"),
                     help="Photometry: tesscut (FFI custom aperture, default), "
@@ -8769,5 +8832,7 @@ if __name__ == "__main__":
         if hasattr(_s, "reconfigure"):
             _s.reconfigure(encoding="utf-8", errors="replace")
     cfg._command_line = shlex.join([os.path.basename(sys.argv[0])] + sys.argv[1:])
+    if args.prefetch_only:
+        raise SystemExit(1 if prefetch_tesscut(cfg)["failed"] else 0)
     main(cfg)
 
