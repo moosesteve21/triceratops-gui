@@ -55,6 +55,13 @@ def test_no_signal_is_not_recovered(tmp_path):
     assert _tests(A)["Recomputation: BLS"].status == "WARN"
 
 
+def test_small_period_error_that_drifts_is_not_a_pass(tmp_path):
+    # 0.05 % in P is ~4 h of drift over this baseline (T14 = 4 h)
+    A = ta.run_audit(_make_folder(str(tmp_path), period=P * 1.0005))
+    t = _tests(A)["Recomputation: BLS"]
+    assert t.status == "WARN" and "drift apart" in t.evidence, t.evidence
+
+
 def test_deviant_sector_flagged(tmp_path):
     A = ta.run_audit(_make_folder(str(tmp_path), weak_sector=37))
     t = _tests(A)["Recomputation: sectors"]
@@ -79,8 +86,8 @@ def test_outputs_written(tmp_path):
 
 def test_threshold_override(tmp_path):
     folder = _make_folder(str(tmp_path))
-    A = ta.run_audit(folder, thresholds={"bls_period_tol": 1e-9}, recompute_lc=False)
-    assert A.thresholds["bls_period_tol"] == 1e-9
+    A = ta.run_audit(folder, thresholds={"bls_drift_tol": 1e-9}, recompute_lc=False)
+    assert A.thresholds["bls_drift_tol"] == 1e-9
 
 
 def test_failure_carried_by_edge_transits_is_a_warning(tmp_path):

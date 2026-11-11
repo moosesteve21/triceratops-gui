@@ -64,7 +64,7 @@ THRESHOLDS = {
     "dominance_warn": 0.2,
     "valid_frac_warn": 0.8,
     "ground_depth_tol": 0.25,
-    "bls_period_tol": 0.002,          # fractional
+    "bls_drift_tol": 0.5,             # max BLS-vs-pipeline mid-time drift [T14]
     "bls_depth_tol": 0.30,            # fractional
     "sector_depth_chi2_warn": 3.0,
     "input_depth_tol": 0.30,          # reference depth vs measured depth
@@ -834,7 +834,23 @@ def recompute(run: Run, A: Audit, T: dict):
             rP = bls.power(np.array([P]), [0.8 * dur, dur, 1.2 * dur])
             prel = float(rP.power[0] / r.power[i]) if r.power[i] > 0 else np.nan
             res["bls"]["power_ratio_at_P"] = prel
-            ok = p_emp < 0.01 and (dp < T["bls_period_tol"] or prel >= 0.8)
+            # A small fractional period difference can still put the two
+            # ephemerides days apart over a long baseline: compare the
+            # predicted mid-times at the pipeline's epochs with data, with
+            # the BLS epoch numbering anchored to the pipeline's.
+            Tb = float(r.transit_time[i])
+            k0 = round((Tb - T0) / P)
+
+            def t_bls(e):
+                return Tb + (np.asarray(e, float) - k0) * Pb
+
+            st_p = bls.compute_stats(P, dur, T0)
+            tt_p = np.asarray(st_p["transit_times"], float)
+            ep_p = np.round((tt_p[np.asarray(st_p["per_transit_count"]) >= 5] - T0) / P)
+            drift = float(np.max(np.abs(t_bls(ep_p) - (T0 + ep_p * P)))) if ep_p.size else np.nan
+            same = np.isfinite(drift) and drift < T["bls_drift_tol"] * dur
+            res["bls"]["drift_h"] = drift * 24.0
+            ok = p_emp < 0.01 and (same or prel >= 0.8)
             if p_emp >= 0.01:
                 adv = "the signal is not recovered above the noise with independent detrending"
             else:
@@ -844,9 +860,7 @@ def recompute(run: Run, A: Audit, T: dict):
                 btjd_now = _time.time() / 86400.0 + 2440587.5 - tzero
                 n_now = round((btjd_now - T0) / P)
                 t_pipe = T0 + n_now * P
-                Tb = float(r.transit_time[i])
-                t_bls = Tb + round((t_pipe - Tb) / Pb) * Pb
-                dt_h = abs(t_bls - t_pipe) * 24.0
+                dt_h = abs(float(t_bls(n_now)) - t_pipe) * 24.0
                 res["bls"]["timing_difference_now_h"] = dt_h
                 adv = (f"period ambiguity in the {'Kepler' if tzero < 2456000 else 'TESS'} data: "
                        f"at epoch {n_now} ({'BKJD' if tzero < 2456000 else 'BTJD'} "
@@ -855,8 +869,10 @@ def recompute(run: Run, A: Audit, T: dict):
             A.test("Recomputation: BLS", "Does an independent box search find the same signal?",
                    "PASS" if ok else "WARN",
                    f"own detrending (running median {win_bls * 24:.0f} h, transits not masked): "
-                   f"best peak on >= {need} of the {n_at_P} transits with data at P = {Pb:.5f} d ({dp * 100:.3f} % from "
-                   f"{P:.5f}; {ne} transits; {skipped} stronger alias(es) on fewer transits "
+                   f"best peak with data in >= {need} of the {n_at_P} transit windows at P = {Pb:.5f} d "
+                   f"({dp * 100:.3f} % from {P:.5f}: the two ephemerides drift apart by up to "
+                   f"{drift * 24:.1f} h = {drift / dur:.2f} T14 over the data; {skipped} stronger "
+                   f"alias(es) with data in fewer windows "
                    f"skipped, top peak {float(r.period[order[0]]):.5f} d), box depth {db:.0f} ppm; box S/N at the pipeline ephemeris "
                    f"{snr_p:.1f}, at 300 random phases max {np.max(null):.1f} "
                    f"(p = {p_emp:.3g}); BLS power at P is {min(prel, 1) * 100:.0f} % of the peak",
