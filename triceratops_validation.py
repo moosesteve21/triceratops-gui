@@ -7549,8 +7549,13 @@ def main(cfg: Config):
     _log(log, f"Output directory:       {cfg.outdir}")
     _log(log, f"TESScut cache directory: {cfg.cache_dir()}")
     _log(log, "(existing cutouts for the same TIC/sector/size are reused)\n")
+    cmd = getattr(cfg, "_command_line", None)
+    if cmd:
+        _log(log, f"Command line: {cmd}\n")
 
     cfg._summary = {}
+    if cmd:
+        _summary(cfg)["command_line"] = cmd
     # TRICERATOPS+ (and triceratops < 1.1) have no dilution_corrected
     # argument: a light curve on the target's flux scale would then be
     # corrected for the dilution a second time.  Keep the aperture scale.
@@ -8667,5 +8672,8 @@ if __name__ == "__main__":
     cfg.tri_plus = args.tri_plus
     if args.exclude_stars:
         cfg.exclude_stars = tuple(int(x) for x in args.exclude_stars)
+    import shlex
+    import sys
+    cfg._command_line = shlex.join([os.path.basename(sys.argv[0])] + sys.argv[1:])
     main(cfg)
 
