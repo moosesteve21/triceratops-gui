@@ -489,6 +489,11 @@ class Config:
     # 8.0 still blocks gross TTVs / false alarms while allowing modest scatter.
     refine_from_transits: bool = True
     refine_chi2_max: float = 8.0
+    # A refined ephemeris is adopted only if it predicts the mid-time of every
+    # epoch with data to within this fraction of T14 (1 sigma).  A fit to a
+    # cluster of transits (e.g. two adjacent sectors) is otherwise
+    # extrapolated over the whole baseline.
+    ephem_adopt_max_sigma: float = 0.25
     # The LD fit may overwrite the adopted depth / T14 only if its T0 shift
     # is below this fraction of T14 (a larger shift means the fold is smeared).
     ld_update_max_t0shift: float = 0.15
@@ -2838,14 +2843,37 @@ def per_transit_depths(time, flux, flux_err, results, cfg: Config,
     return dt
 
 
-def refine_ephemeris_from_transits(dt, P, T0, dur, cfg: Config):
+def _ephem_pred_sigma(cov, epochs):
+    """1-sigma uncertainty [d] of T0 + E * P at each epoch E, from the 2x2
+    covariance of (T0, P) with T0 at epoch 0."""
+    c = np.asarray(cov, float)
+    E = np.asarray(epochs, float)
+    return np.sqrt(np.maximum(c[0, 0] + 2.0 * E * c[0, 1] + E ** 2 * c[1, 1], 0.0))
+
+
+def _ephem_constrained(cov, epochs_data, dur, cfg: Config):
+    """(ok, worst_epoch, worst_sigma_d): does the fitted ephemeris predict
+    every epoch with data to within cfg.ephem_adopt_max_sigma x T14?"""
+    ep = np.asarray(sorted(set(int(e) for e in epochs_data)), float)
+    if ep.size == 0:
+        return True, None, 0.0
+    sig = _ephem_pred_sigma(cov, ep)
+    k = int(np.argmax(sig))
+    return (bool(sig[k] <= cfg.ephem_adopt_max_sigma * dur),
+            int(ep[k]), float(sig[k]))
+
+
+def refine_ephemeris_from_transits(dt, P, T0, dur, cfg: Config,
+                                   epochs_data=None):
     """Linear ephemeris from the measured individual mid-times.
 
     Uses transits with snr >= per_transit_min_snr and a measured timing
     error.  Returns a dict (``updated`` tells whether the new P, T0 should
     be adopted) or None when there are too few transits.  A high chi2_red
     of the linear fit points to TTVs or false detections; the ephemeris is
-    then left alone.
+    then left alone.  So is a fit that does not predict every epoch in
+    *epochs_data* (default: the epochs of *dt*) to within
+    cfg.ephem_adopt_max_sigma x T14.
     """
     if dt is None or dt.size == 0:
         return None
@@ -2870,10 +2898,21 @@ def refine_ephemeris_from_transits(dt, P, T0, dur, cfg: Config):
                eT0=float(np.sqrt(cov[0, 0]) * scale),
                chi2_red=chi2r, oc_rms_min=float(np.std(resid) * 1440.0),
                epochs=ep.astype(int), oc=resid, e_oc=sig)
+    # cov is for (a, b) = (T0 shift, P shift), the same as (T0, P)
+    ok_c, e_w, s_w = _ephem_constrained(
+        cov * scale ** 2, dt["epoch"] if epochs_data is None else epochs_data,
+        dur, cfg)
+    out.update(worst_epoch=e_w, worst_sigma_d=s_w)
     if chi2r > cfg.refine_chi2_max:
         out.update(updated=False,
                    reason=f"linear ephemeris fits poorly (chi2_red = "
                           f"{chi2r:.1f}): possible TTVs or false detections")
+    elif not ok_c:
+        out.update(updated=False,
+                   reason=f"the fit predicts epoch {e_w} only to +-"
+                          f"{s_w * 24:.2f} h (> {cfg.ephem_adopt_max_sigma:g} "
+                          f"T14): the fitted transits do not constrain the "
+                          f"whole baseline")
     else:
         out.update(updated=True, reason="ok")
     return out
@@ -2968,7 +3007,7 @@ def fit_linear_ephemeris(rows, P, T0, dur, min_snr=5.0, tol_frac=0.15,
     cov = np.linalg.inv(A.T @ A) * max(s2, (2.0 / 1440.0) ** 2)
     rms = float(np.sqrt(np.mean(res ** 2)))
     return dict(P=float(Pn), T0=float(T0n), eP=float(np.sqrt(cov[1, 1])),
-                eT0=float(np.sqrt(cov[0, 0])), n=int(inl.sum()),
+                eT0=float(np.sqrt(cov[0, 0])), cov=cov.tolist(), n=int(inl.sum()),
                 rms_min=rms * 1440.0, ok=rms < max_rms_frac * dur,
                 epochs=[int(e) for e in ep[inl]],
                 rejected=[int(e) for e in ep[~inl]],
@@ -3192,6 +3231,7 @@ def check_known_ephemeris(time, flux, flux_err, P, T0, dur, cfg: Config,
         fit_i, _ = fit_linear_ephemeris(rows, P1, T01, dur,
                                         min_snr=cfg.ephem_scan_min_snr)
         if it == 0:
+            ep_data = [r["epoch"] for r in rows]       # epochs with data
             for r in rows:
                 _log(log, f"  epoch {r['epoch']:4d}  predicted {r['Tc_pred']:.4f}"
                           f"  found {r['Tc']:.4f}  ({(r['Tc'] - r['Tc_pred']) * 24:+6.2f} h)"
@@ -3217,17 +3257,31 @@ def check_known_ephemeris(time, flux, flux_err, P, T0, dur, cfg: Config,
     T0_mid = fit["T0"] + e_mid * P_new
     ep_used = np.asarray(fit["epochs"], float)
     drift = float(np.max(np.abs((T0 + ep_used * P) - (T0_new + ep_used * P_new))))
+    ep_all = np.asarray(sorted(set(ep_data) | set(fit["epochs"])), float)
+    drift_all = float(np.max(np.abs((T0 + ep_all * P) - (T0_new + ep_all * P_new))))
     _log(log, f"  linear fit of {fit['n']} transits (epochs {fit['epochs']}"
               + (f", rejected {fit['rejected']}" if fit.get("rejected") else "")
               + f"): P = {P_new:.6f} +/- {fit['eP']:.6f} d, "
               f"T0 = {T0_new:.5f} {TIME_LABEL} (epoch 0) = {T0_mid:.5f} (epoch {e_mid}), "
               f"O-C rms = {fit['rms_min']:.1f} min")
-    if drift < 0.1 * dur:
+    if drift_all < 0.1 * dur:
         _log(log, "  known ephemeris confirmed (drift < 0.1 T14 over the "
                   "baseline); kept")
         return P, T0, fit
+    ok_c, e_w, s_w = _ephem_constrained(fit["cov"], ep_all, dur, cfg)
+    if not ok_c:
+        fit["ok"] = False
+        _log(log, f"  ! refined ephemeris NOT adopted: fitted on epochs "
+                  f"{min(fit['epochs'])}-{max(fit['epochs'])} only, it predicts "
+                  f"epoch {e_w} (with data) to +-{s_w * 24:.2f} h "
+                  f"(> {cfg.ephem_adopt_max_sigma:g} T14). It differs from the "
+                  f"known ephemeris by up to {drift * 24:.2f} h at the fitted "
+                  f"epochs and {drift_all * 24:.2f} h over all epochs with data; "
+                  f"the known ephemeris is kept")
+        return P, T0, fit
     _log(log, f"  ! the known ephemeris misses the transits by up to "
-              f"{drift * 24:.2f} h (= {drift / dur:.2f} T14); "
+              f"{drift * 24:.2f} h (= {drift / dur:.2f} T14) at the fitted "
+              f"epochs, {drift_all * 24:.2f} h over all epochs with data; "
               f"ADOPTING the refined ephemeris "
               f"(P {P:.6f} -> {P_new:.6f} d, T0 -> {T0_new:.5f}). "
               f"Use --ephem-search off to keep the input values.")
@@ -7750,7 +7804,10 @@ def main(cfg: Config):
 
     # refine P and T0 from the measured mid-times, then redo the fits
     if cfg.refine_from_transits and dt.size:
-        ref = refine_ephemeris_from_transits(dt, P_orb, T0, dur_pt, cfg)
+        ep_with_data = list(dt["epoch"]) + [e_ for e_, _, why in rejected
+                                             if why != "no data"]
+        ref = refine_ephemeris_from_transits(dt, P_orb, T0, dur_pt, cfg,
+                                             epochs_data=ep_with_data)
         if ref is None or "P" not in ref:
             _log(log, f"  ephemeris refinement skipped: "
                       f"{'' if ref is None else ref['reason']}")
@@ -8294,6 +8351,11 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Max chi2_red of the linear timing fit before the "
                          "refined ephemeris is rejected (default: 8).  Raise "
                          "for long-period targets with few transits.")
+    ap.add_argument("--ephem-adopt-max-sigma", type=float, default=None,
+                    metavar="F",
+                    help="A refined ephemeris is adopted only if it predicts "
+                         "every epoch with data to within F x T14 (1 sigma; "
+                         "default 0.25).")
     ap.add_argument("--no-tc-fit", action="store_true",
                     help="Keep the mid-time of each individual transit fixed "
                          "at the ephemeris value.")
@@ -8497,6 +8559,8 @@ if __name__ == "__main__":
         cfg.P_max = float(args.p_max)
     if args.refine_chi2_max is not None:
         cfg.refine_chi2_max = float(args.refine_chi2_max)
+    if args.ephem_adopt_max_sigma is not None:
+        cfg.ephem_adopt_max_sigma = float(args.ephem_adopt_max_sigma)
     if getattr(args, "sector_max_rms", None) is not None:
         cfg.sector_max_rms = float(args.sector_max_rms)
     if args.detrend_windows:

@@ -86,6 +86,43 @@ def test_scan_recovers_drifting_ephemeris(tmp_path):
     assert abs(P1 - P_TRUE) < 2e-3
 
 
+def test_scan_does_not_adopt_fit_to_clustered_transits(tmp_path):
+    # Early sectors too noisy for single transits, the
+    # last two sectors clean.  A fit to the late transits only must not be
+    # extrapolated over the whole baseline.
+    P, T0, dur, dep = 7.4421, 1570.30, 1.4 / 24, 1500e-6
+    rng = np.random.default_rng(7)
+    early = _times(10.0, ((1569, 1595), (2283, 2309), (3010, 3036)))
+    late = _times(200 / 60, ((4080, 4106), (4107, 4133)))
+    t = np.concatenate([early, late])
+    sig = np.where(t < 4000, 0.010, 0.0006)
+    f = _box(t, P, T0, dur, dep) + rng.normal(0, 1, t.size) * sig
+    cfg = _cfg(tmp_path)
+    P1, T01, fit = tv.check_known_ephemeris(t, f, sig, P, T0, dur, cfg)
+    assert fit is not None and max(fit["epochs"]) - min(fit["epochs"]) < 10
+    assert (P1, T01) == (P, T0)
+    assert fit["ok"] is False          # 'auto' then falls back to the grid
+
+
+def test_refine_from_transits_needs_full_baseline(tmp_path):
+    cfg = _cfg(tmp_path)
+    dur = 1.3 / 24
+
+    def dt_for(epochs, slope_min):
+        return np.array([(int(e), 1570.3 + e * 7.4421, 1.5e-3, 2e-4, 100, 1.0,
+                          (e - epochs[0]) * slope_min / 1440 + 0.5 / 1440 * (-1) ** i,
+                          3.0 / 1440, 7.0, 50.0)
+                         for i, e in enumerate(epochs)], dtype=tv._PT_DTYPE)
+
+    clustered = dt_for([312, 313, 315], 2.0)
+    r = tv.refine_ephemeris_from_transits(clustered, 7.4421, 1570.3, dur, cfg,
+                                          epochs_data=[0, 1, 90, 180, 312, 313, 315])
+    assert r["updated"] is False and r["worst_epoch"] == 0
+    spread = dt_for([0, 1, 90, 180, 312, 313, 315], 0.01)
+    r = tv.refine_ephemeris_from_transits(spread, 7.4421, 1570.3, dur, cfg)
+    assert r["updated"] is True
+
+
 def test_grid_finds_shallow_transit(tmp_path):
     t = _times(cad_min=3.33)
     P, T0, dep = 50.123, 1700.40, 1500e-6
