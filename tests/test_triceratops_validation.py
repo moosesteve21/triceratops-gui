@@ -270,6 +270,22 @@ def test_etv_recovers_ltte_and_odd_even(tmp_path):
     assert abs(out2["odd_even_dt_min"] - 3.0) < 0.5
 
 
+def test_etv_significance_scaled_when_errors_underestimated(tmp_path):
+    # TOI-7930.02-like: pure timing noise of 18 min with quoted errors of
+    # 4 min (chi2_red ~ 20).  Nothing should look significant.
+    cfg = _cfg(tmp_path)
+    rng = np.random.default_rng(3)
+    E = np.sort(rng.choice(np.arange(0, 800), 26, replace=False))
+    oc = rng.normal(0, 18.0 / 1440, E.size)
+    dt = np.array([(int(e), T0_TRUE + e * 3.18, 1e-3, 3e-4, 40, 1.0,
+                    o, 4.0 / 1440, 3.0, 9.0) for e, o in zip(E, oc)],
+                  dtype=tv._PT_DTYPE)
+    out = tv.etv_analysis(dt, 3.18, T0_TRUE, cfg, 1)
+    assert out["chi2_red"] > 8
+    assert abs(out["odd_even_dt_min"]) / out["odd_even_dt_err_min"] < 3
+    assert out["ltte_dchi2"] < 15 and out["dchi2_quad"] < 9
+
+
 # ------------------------------------------------------------ helpers
 def test_exptime_kwargs_and_effective_exposure(tmp_path):
     cfg = _cfg(tmp_path)

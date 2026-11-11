@@ -3627,6 +3627,15 @@ def etv_analysis(dt, P, T0, cfg: "Config", tic: int, log=None):
     _log(log, f"\n--- Eclipse timing variations ({n} mid-times) ---")
     _log(log, f"  linear ephemeris: P = {out['P']:.6f} +/- {out['eP']:.6f} d; "
               f"O-C rms = {out['rms_min']:.1f} min, chi2_red = {out['chi2_red']:.2f}")
+    if out["chi2_red"] > 2.0:
+        _log(log, f"  ! the O-C scatter is {np.sqrt(out['chi2_red']):.1f} x the "
+                  f"per-transit timing errors (errors underestimated, or real "
+                  f"timing variations): every test below scales its errors by "
+                  f"the chi2_red of its own model")
+
+    def _scale(chi, k):
+        """Error inflation from a model with k parameters (>= 1)."""
+        return max(chi / max(n - k, 1), 1.0)
     # odd / even
     odd = (np.mod(E, 2) == 1)
     if odd.any() and (~odd).any():
@@ -3635,7 +3644,8 @@ def etv_analysis(dt, P, T0, cfg: "Config", tic: int, log=None):
             return np.sum(ww * r1[sel]) / np.sum(ww), 1 / np.sqrt(np.sum(ww))
         mo, eo = wm(odd)
         me, ee = wm(~odd)
-        dlt, edl = mo - me, np.hypot(eo, ee)
+        _, _, _, chi_oe = wls(np.column_stack([np.ones_like(E), E, odd.astype(float)]))
+        dlt, edl = mo - me, np.hypot(eo, ee) * np.sqrt(_scale(chi_oe, 3))
         ecosw = np.pi * dlt / (4.0 * P)            # binary at 2P: half-period offset
         eecw = np.pi * edl / (4.0 * P)
         out.update(odd_even_dt_min=float(dlt * 1440), odd_even_dt_err_min=float(edl * 1440),
@@ -3649,11 +3659,12 @@ def etv_analysis(dt, P, T0, cfg: "Config", tic: int, log=None):
         p2, c2, r2, chi2q = wls(A2)
         q, eq = p2[2], np.sqrt(c2[2, 2] * max(chi2q / max(n - 3, 1), 1))
         pdot = 2 * q / P                          # dP/dt [d/d]
+        dchi2_q = (chi1 - chi2q) / _scale(chi2q, 3)
         out.update(dPdE_d=float(2 * q), dPdE_err_d=float(2 * eq),
-                   Pdot=float(pdot), dchi2_quad=float(chi1 - chi2q))
+                   Pdot=float(pdot), dchi2_quad=float(dchi2_q))
         _log(log, f"  quadratic ephemeris: dP/dE = {2 * q * 86400:+.3f} +/- "
                   f"{2 * eq * 86400:.3f} s per cycle ({q / eq:+.1f} sigma); "
-                  f"delta chi2 vs linear = {chi1 - chi2q:.1f}")
+                  f"delta chi2 vs linear = {dchi2_q:.1f}")
     # light-travel time effect
     span = float(t.max() - t.min())
     if n >= 6 and span > 0:
@@ -3674,14 +3685,15 @@ def etv_analysis(dt, P, T0, cfg: "Config", tic: int, log=None):
         inside = lims[:, 0] <= span
         lim_in = float(np.median(lims[inside, 1])) if inside.any() else np.nan
         c_au_per_day = 173.1446
+        dchi2_l = (chi1 - best[1]) / _scale(best[1], 4)
         out.update(ltte_best_P=float(best[0]), ltte_best_K_min=float(best[2] * 1440),
-                   ltte_dchi2=float(chi1 - best[1]),
+                   ltte_dchi2=float(dchi2_l),
                    ltte_lim3_min=float(lim_in * 1440),
                    ltte_lim3_au=float(lim_in * c_au_per_day))
         _log(log, f"  light-travel-time search (outer period {3 * P:.0f}-"
                   f"{3 * span:.0f} d): best P_out = {best[0]:.0f} d, amplitude "
                   f"{best[2] * 1440:.1f} +/- {best[3] * 1440:.1f} min, delta chi2 = "
-                  f"{chi1 - best[1]:.1f} (4 extra parameters: not significant "
+                  f"{dchi2_l:.1f} (4 extra parameters: not significant "
                   f"below ~15)")
         if np.isfinite(lim_in):
             _log(log, f"  3-sigma limit on an LTTE amplitude for P_out <= "
