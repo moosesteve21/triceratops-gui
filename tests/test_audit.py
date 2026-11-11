@@ -108,6 +108,18 @@ def test_failure_carried_by_edge_transits_stays_a_failure(tmp_path):
     assert _tests(A)["Odd/even"].status == "FAIL"
 
 
+def test_low_coverage_transits_are_named(tmp_path):
+    extra = dict(odd_even_sigma=3.4, odd_even_sigma_excl_edge=1.6,
+                 depth_chi2_red=2.1, depth_chi2_red_excl_edge=1.4,
+                 edge_transit_epochs=[1], low_coverage_epochs=[12, 17])
+    A = ta.run_audit(_make_folder(str(tmp_path), summary_extra=extra), recompute_lc=False)
+    t = _tests(A)["Odd/even"]
+    assert "1.60 sigma without the transit(s) next to a data gap (epochs [1]) or with " \
+           "too little in-transit data (epochs [12, 17])" in t.evidence, t.evidence
+    if t.status == "FAIL":
+        assert "flagged transits" in t.advice
+
+
 def test_absent_odd_transits_advise_2p(tmp_path):
     extra = dict(odd_even_sigma=5.5, missing_parity="odd", P_d=6.5,
                  depth_odd_ppm=-120.0, depth_odd_err_ppm=180.0,
