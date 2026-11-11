@@ -104,6 +104,21 @@ def test_failure_carried_by_edge_transits_is_a_warning(tmp_path):
     assert _tests(A)["Odd/even"].status == "FAIL"
 
 
+def test_density_with_unconstrained_b(tmp_path):
+    def shape(rho_fit, rho_cat):
+        log = (f"  b    = 0.10000 +/- 40.00000\n"
+               f"  rho_star (circular orbit) = {rho_fit} g/cm^3\n"
+               f"  rho_star from TIC mass/radius       = {rho_cat} g/cm^3   (consistency check)\n")
+        extra = {"ld_fit": {"rp": 0.0400, "b": 0.1000, "grazing": False, "T14_h": 1.5}}
+        A = ta.run_audit(_make_folder(str(tmp_path), log_extra=log, summary_extra=extra),
+                         recompute_lc=False)
+        return _tests(A)["Shape"]
+    t = shape(25.0, 2.5)                # a higher b explains it
+    assert t.status == "PASS" and "b = 0.92" in t.evidence, t.evidence
+    t = shape(1.0, 5.0)                 # too long even for a central transit
+    assert t.status == "WARN" and "stellar density" in t.evidence, t.evidence
+
+
 def test_audit_never_changes_inputs(tmp_path):
     folder = _make_folder(str(tmp_path))
     before = {f: os.path.getmtime(os.path.join(folder, f)) for f in os.listdir(folder)}

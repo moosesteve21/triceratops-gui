@@ -487,14 +487,32 @@ def skeptic(run: Run, A: Audit, T: dict):
     m, ln = run.grep(r"rho_star \(circular orbit\) = ([\d.]+)")
     m2, _ = run.grep(r"rho_star from TIC mass/radius\s+= ([\d.]+)")
     mb, lnb = run.grep(r"^\s+b\s+=\s+([\d.]+) \+/- ([\d.]+)")
-    issues = []
+    issues, notes = [], []
     if L.get("grazing") or mg:
         issues.append(f"grazing (b + k = {mg.group(1)})" if mg else "grazing")
+    b_free = bool(mb and float(mb.group(2)) > 1)
     if m and m2:
-        r = float(m.group(1)) / float(m2.group(1))
+        rho0, rho_c = float(m.group(1)), float(m2.group(1))
+        r = rho0 / rho_c
         if r > T["density_ratio_warn"] or r < 1 / T["density_ratio_warn"]:
-            issues.append(f"stellar density {m.group(1)} vs {m2.group(1)} g/cm3 (ratio {r:.2f})")
-    if mb and float(mb.group(2)) > 1:
+            # With b unconstrained, T14 fixes a/R* only up to
+            # sqrt((1+k)^2 - b^2): rho(b) = rho0 [((1+k)^2-b^2)/((1+k)^2-b0^2)]^1.5.
+            # Look for a b in [0, 1+k) that gives the catalogue density.
+            k = L.get("rp")
+            b0 = L.get("b", float(mb.group(1)) if mb else None)
+            b_match = None
+            if b_free and k is not None and b0 is not None:
+                s2 = (1 + k) ** 2 - b0 ** 2
+                b2 = (1 + k) ** 2 - s2 * (rho_c / rho0) ** (2.0 / 3.0)
+                if 0.0 <= b2 < (1 + k) ** 2:
+                    b_match = float(np.sqrt(b2))
+            if b_match is not None:
+                notes.append(f"stellar density {rho0:g} at b = {b0:.2f} vs {rho_c:g} g/cm3, "
+                             f"but b is unconstrained and b = {b_match:.2f} gives the "
+                             f"catalogue density")
+            else:
+                issues.append(f"stellar density {m.group(1)} vs {m2.group(1)} g/cm3 (ratio {r:.2f})")
+    if b_free and not notes:
         issues.append(f"b unconstrained ({mb.group(1)} +/- {float(mb.group(2)):.3g})")
     if not (L or m):
         A.test("Shape", "Is the shape physical for this star?", "NA",
@@ -504,7 +522,8 @@ def skeptic(run: Run, A: Audit, T: dict):
                run.src(lng or ln), "an eccentric orbit, a wrong host or an EB can cause this")
     else:
         A.test("Shape", "Is the shape physical for this star?", "PASS",
-               "not grazing; stellar density consistent", run.src(ln))
+               "not grazing; " + ("; ".join(notes) if notes else "stellar density consistent"),
+               run.src(ln))
 
     # 8. dilution
     gr = run.S("g_target_range")
