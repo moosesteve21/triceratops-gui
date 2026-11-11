@@ -18,3 +18,17 @@ scratch/
 
 # Written to the working directory by triceratops' query_gaia_background
 *_gaia_background.csv
+
+# Local run outputs and private profiles (unpublished candidates)
+results/
+profiles/*
+!profiles/profile_KIC3755522.json
+!profiles/profile_TIC100796276.json
+!profiles/profile_TIC165501544.json
+!profiles/profile_TIC229675482.json
+!profiles/profile_TIC229701403_b.json
+!profiles/profile_TIC229701403_c.json
+!profiles/profile_TIC229788204.json
+!profiles/profile_TIC65344135.json
+!profiles/profile_TIC65344135_triplus.json
+!profiles/profile_template_new_candidate.json
