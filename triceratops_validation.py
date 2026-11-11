@@ -7543,7 +7543,7 @@ def _log(fh, text):
 def main(cfg: Config):
     
     tic = cfg.tic
-    log = open(cfg.path(f"triceratops_output_TIC{tic}.txt"), "w")
+    log = open(cfg.path(f"triceratops_output_TIC{tic}.txt"), "w", encoding="utf-8")
 
     _log(log, f"=== Statistical validation of TIC {tic} ===\n")
     _log(log, f"Output directory:       {cfg.outdir}")
@@ -8674,6 +8674,11 @@ if __name__ == "__main__":
         cfg.exclude_stars = tuple(int(x) for x in args.exclude_stars)
     import shlex
     import sys
+    # Windows: a redirected stdout uses the ANSI code page, which cannot
+    # encode the arrows in the log messages (every sector then "failed")
+    for _s in (sys.stdout, sys.stderr):
+        if hasattr(_s, "reconfigure"):
+            _s.reconfigure(encoding="utf-8", errors="replace")
     cfg._command_line = shlex.join([os.path.basename(sys.argv[0])] + sys.argv[1:])
     main(cfg)
 
