@@ -170,6 +170,64 @@ if not hasattr(_sci_int, "trapz") and hasattr(_sci_int, "trapezoid"):
 import triceratops.triceratops as tr
 
 
+# Network.  MAST refuses requests or stops sending now and then, more so
+# when other pipelines download at the same time.  "timeout": seconds an
+# astroquery request or download may wait for data (set_network_timeout);
+# "retries": attempts for MAST queries and TESScut downloads; "wait": the
+# pause after the first failure, growing linearly (30, 60, 90 s ...).
+NET = {"timeout": 300.0, "retries": 4, "wait": 30.0}
+
+
+def set_network_timeout(seconds: Optional[float]) -> None:
+    """Give astroquery requests and downloads a timeout when the caller set none.
+
+    astroquery's TESScut download (used by lightkurve) and the MAST catalogue
+    requests call requests with timeout=None, so a server that accepts the
+    connection and then stops sending blocks the run indefinitely, and no
+    retry ever starts.  With a timeout the stall becomes an exception that
+    the retries handle.  None or 0 leaves astroquery unchanged.
+    """
+    import functools
+    import inspect as _inspect
+    from astroquery.query import BaseQuery
+    NET["timeout"] = float(seconds) if seconds else None
+    for name in ("_request", "_download_file"):
+        orig = getattr(BaseQuery, name)
+        orig = getattr(orig, "_tv_original", orig)
+        if not seconds:
+            setattr(BaseQuery, name, orig)
+            continue
+        sig = _inspect.signature(orig)
+
+        def wrapper(self, *args, _orig=orig, _sig=sig, **kwargs):
+            bound = _sig.bind_partial(self, *args, **kwargs)
+            unset = ("timeout" not in bound.arguments
+                     or ("timeout" in kwargs and kwargs["timeout"] is None))
+            if unset and NET["timeout"]:
+                kwargs["timeout"] = NET["timeout"]
+            return _orig(self, *args, **kwargs)
+
+        functools.update_wrapper(wrapper, orig)
+        wrapper._tv_original = orig
+        setattr(BaseQuery, name, wrapper)
+
+
+def _net_retry(fn, *args, what: str = "MAST query", **kwargs):
+    """fn(*args, **kwargs), retried with growing pauses when it raises."""
+    import time as _time
+    n = max(int(NET["retries"] or 1), 1)
+    for attempt in range(1, n + 1):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as exc:
+            if attempt == n:
+                raise
+            wait = NET["wait"] * attempt
+            print(f"  ! {what} failed ({str(exc)[:100]}); attempt {attempt + 1}/{n} "
+                  f"in {wait:.0f} s")
+            _time.sleep(wait)
+
+
 def _patch_triceratops_compat():
     """Fix triceratops' Gauss2D for NumPy 2 in versions that lack the fix.
 
@@ -638,8 +696,9 @@ class Config:
     # T14/20/n_epochs in P, so a run of ~100 x 100 points takes seconds.
     ephem_grid_dP: Optional[float] = None
     ephem_grid_min_snr: float = 7.0
-    # MAST TESScut downloads fail now and then (502 / "Request failed").
-    tesscut_retries: int = 3
+    # MAST TESScut downloads fail now and then (502 / "Request failed", or
+    # a stalled connection once --net-timeout turns it into an error).
+    tesscut_retries: int = 4
 
     def __post_init__(self) -> None:
         # Default output directory is TIC{tic}/ so every target lands in its
@@ -712,9 +771,9 @@ def field_catalog(tic: int, ra: float, dec: float, cfg: "Config", log=None):
         except Exception:
             pass
     try:
-        tab = Catalogs.query_region(SkyCoord(ra, dec, unit="deg"),
-                                    radius=cfg.field_radius_arcsec * u.arcsec,
-                                    catalog="TIC")
+        tab = _net_retry(Catalogs.query_region, SkyCoord(ra, dec, unit="deg"),
+                         radius=cfg.field_radius_arcsec * u.arcsec,
+                         catalog="TIC", what="field catalogue query")
     except Exception as exc:
         _log(log, f"  ! field catalogue query failed ({exc}); "
                   f"no PSF model of the field")
@@ -841,7 +900,7 @@ def apply_dilution_correction(sd: "SectorData", cfg: "Config") -> None:
 # --------------------------------------------------------------------------
 def stellar_params(tic: int, kic: Optional[int] = None) -> dict:
     """Query the TIC by *column name* rather than by positional index."""
-    tab = Catalogs.query_criteria(catalog="Tic", ID=tic)
+    tab = _net_retry(Catalogs.query_criteria, catalog="Tic", ID=tic, what="TIC query")
     if len(tab) == 0:
         raise ValueError(f"TIC {tic} not found")
     row = tab[0]
@@ -1100,11 +1159,14 @@ def apply_star_overrides(star: dict, cfg, tic: int, log=None) -> dict:
     return star
 
 
-def find_tess_sectors(tic: int, cfg: Optional[Config] = None) -> np.ndarray:
+def find_tess_sectors(tic: int, cfg: Optional[Config] = None,
+                      use_cache: bool = True) -> np.ndarray:
     """Sectors with photometry for this TIC (FFI cutouts or SPOC LC).
 
     When ``cfg.lc_source`` is ``sap`` / ``pdcsap``, returns sectors that have
-    a SPOC light curve. Otherwise returns TESScut FFI coverage.
+    a SPOC light curve. Otherwise returns TESScut FFI coverage; if MAST
+    cannot be reached, the sectors already in the cache (unless
+    ``use_cache`` is False: then the search is retried and must succeed).
     """
     if is_kepler():
         return _find_kepler_quarters(cfg)
@@ -1112,7 +1174,7 @@ def find_tess_sectors(tic: int, cfg: Optional[Config] = None) -> np.ndarray:
     if src in ("sap", "pdcsap"):
         return _find_spoc_lc_sectors(tic, cfg)
 
-    if cfg is not None:
+    if cfg is not None and use_cache:
         found = set()
         for cache in _tesscut_cache_dirs(cfg):
             for sec, paths in _build_tesscut_index(cache).items():
@@ -1122,7 +1184,9 @@ def find_tess_sectors(tic: int, cfg: Optional[Config] = None) -> np.ndarray:
     else:
         found = set()
     try:
-        search = lk.search_tesscut(f"TIC {tic}")
+        # with cutouts already cached, fail fast and use them (below)
+        search = (lk.search_tesscut(f"TIC {tic}") if found else
+                  _net_retry(lk.search_tesscut, f"TIC {tic}", what="TESScut sector search"))
         if len(search) == 0:
             raise RuntimeError(f"No TESScut data for TIC {tic}")
         return np.array(sorted({int(s) for s in search.table["sequence_number"]}))
@@ -1393,7 +1457,8 @@ def _tesscut_target_coord(tic, cfg):
     """Memoize coordinates; main() normally already obtained them from TIC."""
     known = getattr(cfg, "_tesscut_coords", None)
     if known is None or known[0] != int(tic):
-        tab = Catalogs.query_criteria(catalog="Tic", ID=tic)
+        tab = _net_retry(Catalogs.query_criteria, catalog="Tic", ID=tic,
+                         what="TIC coordinate query")
         if len(tab) == 0:
             raise ValueError(f"TIC {tic} not found")
         coord = SkyCoord(float(tab[0]["ra"]), float(tab[0]["dec"]), unit="deg")
@@ -1469,7 +1534,7 @@ def _load_tesscut_tpf(tic: int, sector: int, cutout_size: int, cfg: Config,
             last_exc = exc
             if "No TESScut product" in str(exc) or attempt == n_try:
                 break
-            wait = 15 * attempt
+            wait = NET["wait"] * attempt
             print(f"    download attempt {attempt}/{n_try} failed "
                   f"({str(exc)[:80]}); retrying in {wait} s")
             _time.sleep(wait)
@@ -1505,7 +1570,7 @@ def prefetch_tesscut(cfg: Config) -> dict:
         raise SystemExit("--prefetch-only supports TESS runs with --lc-source "
                          "tesscut only")
     print(f"Prefetching TESScut cutouts for TIC {tic} into {cfg.cache_dir()}")
-    sectors = [int(s) for s in find_tess_sectors(tic, cfg=cfg)]
+    sectors = [int(s) for s in find_tess_sectors(tic, cfg=cfg, use_cache=False)]
     excl = {int(s) for s in (cfg.exclude_sectors or [])}
     if excl:
         print(f"  excluding sectors {sorted(excl & set(sectors))}")
@@ -8500,6 +8565,13 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--download-dir", type=str, default=None,
                     help="TESScut / SPOC cache directory (default: <outdir>/tesscut_cache). "
                          "Already-downloaded products are reused.")
+    ap.add_argument("--net-timeout", type=float, default=300.0,
+                    help="Seconds a MAST request or TESScut download may wait for "
+                         "data before it is abandoned and retried (0: no limit, "
+                         "as astroquery). Default 300.")
+    ap.add_argument("--net-retries", type=int, default=4,
+                    help="Attempts for each MAST query and TESScut download, with "
+                         "pauses of 30, 60, 90 s ... between them. Default 4.")
     ap.add_argument("--prefetch-only", action="store_true",
                     help="Only download the TESScut cutouts this run would read "
                          "(every sector, every cutout size) into the cache, then "
@@ -8832,6 +8904,9 @@ if __name__ == "__main__":
         if hasattr(_s, "reconfigure"):
             _s.reconfigure(encoding="utf-8", errors="replace")
     cfg._command_line = shlex.join([os.path.basename(sys.argv[0])] + sys.argv[1:])
+    NET["retries"] = max(int(args.net_retries), 1)
+    cfg.tesscut_retries = NET["retries"]
+    set_network_timeout(args.net_timeout)
     if args.prefetch_only:
         raise SystemExit(1 if prefetch_tesscut(cfg)["failed"] else 0)
     main(cfg)

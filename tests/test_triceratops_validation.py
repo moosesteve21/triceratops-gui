@@ -125,13 +125,61 @@ def test_scan_does_not_rescan_with_a_short_baseline_fit(tmp_path):
     assert fit["ok"] is False
 
 
+def test_net_retry_retries_then_gives_up(monkeypatch):
+    monkeypatch.setitem(tv.NET, "wait", 0.0)
+    monkeypatch.setitem(tv.NET, "retries", 3)
+    calls = []
+
+    def flaky(x, fail=2):
+        calls.append(x)
+        if len(calls) <= fail:
+            raise ConnectionError("MAST stopped responding")
+        return x * 2
+
+    assert tv._net_retry(flaky, 21) == 42 and len(calls) == 3
+    calls.clear()
+    with pytest.raises(ConnectionError):
+        tv._net_retry(flaky, 1, fail=5)
+    assert len(calls) == 3
+
+
+def test_network_timeout_fills_in_only_a_missing_timeout(monkeypatch):
+    from astroquery.query import BaseQuery
+    seen = []
+
+    def rec_request(self, method, url, params=None, timeout=None, **kw):
+        seen.append(timeout)
+
+    def rec_download(self, url, local_filepath, timeout=None, **kw):
+        seen.append(timeout)
+
+    monkeypatch.setattr(BaseQuery, "_request", rec_request)
+    monkeypatch.setattr(BaseQuery, "_download_file", rec_download)
+    monkeypatch.setitem(tv.NET, "timeout", tv.NET["timeout"])
+    q = BaseQuery()
+    tv.set_network_timeout(42)
+    q._request("GET", "u")                        # astroquery's MAST calls: no timeout
+    q._request("GET", "u", timeout=5)             # an explicit timeout is kept
+    q._download_file("u", "f")                    # TESScut download: no timeout
+    q._download_file("u", "f", None)              # passed positionally: left alone
+    tv.set_network_timeout(42)                    # idempotent: no double wrapping
+    q._download_file("u", "f", timeout=None)
+    tv.set_network_timeout(0)                     # 0 restores astroquery's behaviour
+    q._request("GET", "u")
+    assert seen == [42, 5, 42, None, 42, None]
+    assert BaseQuery._request is rec_request
+
+
 def test_prefetch_downloads_every_size_a_run_reads(tmp_path, monkeypatch):
     import json
     cfg = _cfg(tmp_path, exclude_sectors=[33])
     assert tv.prefetch_cutout_sizes(cfg) == [10, 22]          # photometry, TRICERATOPS
     cfg.vet_neighbours = True
     assert tv.prefetch_cutout_sizes(cfg) == [10, 22, 23]      # + neighbour vetting
-    monkeypatch.setattr(tv, "find_tess_sectors", lambda tic, cfg=None: np.array([6, 33, 87]))
+    seen = {}
+    monkeypatch.setattr(tv, "find_tess_sectors",
+                        lambda tic, cfg=None, use_cache=True:
+                        seen.update(use_cache=use_cache) or np.array([6, 33, 87]))
     cached = {(6, 10)}
     monkeypatch.setattr(tv, "_find_cached_tesscut",
                         lambda root, s, size, tic, cfg: "x" if (s, size) in cached else None)
@@ -144,6 +192,7 @@ def test_prefetch_downloads_every_size_a_run_reads(tmp_path, monkeypatch):
 
     monkeypatch.setattr(tv, "_load_tesscut_tpf", fake_load)
     rec = tv.prefetch_tesscut(cfg)
+    assert seen["use_cache"] is False       # the full sector list, never the cached subset
     assert got == [(6, 22), (6, 23), (87, 10), (87, 22)]     # sector 33 excluded
     assert rec["cached"] == 1 and rec["downloaded"] == 4
     assert rec["failed"] == [dict(sector=87, size=23, error="MAST 502")]

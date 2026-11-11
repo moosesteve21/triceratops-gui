@@ -107,7 +107,8 @@ TABS = [
         "ephem_grid_min_snr", "no_refine_ephemeris", "refine_chi2_max",
         "ephem_adopt_max_sigma", "no_tc_fit"]),
     ("Light curve", [
-        "lc_source", "download_dir", "prefetch_only", "exclude_sectors", "no_auto_exclude_sectors",
+        "lc_source", "download_dir", "prefetch_only", "net_timeout", "net_retries",
+        "exclude_sectors", "no_auto_exclude_sectors",
         "sector_max_rms", "aperture", "dilution_mode", "raw_aperture_flux",
         "dilution_corrected", "detrend_windows", "err_floor_ppm", "no_inflate"]),
     ("Shape & tests", [
@@ -141,6 +142,7 @@ LABELS = {
     "no_tc_fit": "Fixed mid-times in per-transit fits",
     "lc_source": "Light-curve source", "download_dir": "TESScut cache folder",
     "prefetch_only": "Only download the cutouts (no analysis)",
+    "net_timeout": "MAST timeout [s]", "net_retries": "MAST attempts",
     "exclude_sectors": "Exclude sectors", "no_auto_exclude_sectors":
     "No automatic sector exclusion", "sector_max_rms": "Max sector rms",
     "aperture": "Aperture", "dilution_mode": "Dilution correction",
