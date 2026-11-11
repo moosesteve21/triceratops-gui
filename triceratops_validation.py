@@ -8040,6 +8040,8 @@ def main(cfg: Config):
                     dur = t14_ld
             _log(log, f"  adopted for TRICERATOPS: depth = {depth * 1e6:.0f} ppm, "
                       f"T14 = {dur * 24:.2f} h")
+            _summary(cfg).update(T14_h=float(dur * 24),
+                                 depth_ppm_adopted=float(depth * 1e6))
         except Exception as exc:
             _log(log, f"\n  ! limb-darkened fit failed ({exc}); "
                       f"the trapezoid is used as reference model")
