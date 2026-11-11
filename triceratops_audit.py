@@ -137,6 +137,8 @@ class Run:
         self.log_lines = self.log.splitlines() if self.log else []
         self.per_transit = self._table(f"per_transit_depths_{t}.txt")
         self.di = self._csv(f"difference_imaging_{t}.csv")
+        self.di_stars = self._csv(f"difference_imaging_stars_{t}.csv")
+        self.field = self._csv(f"field_TIC{t}.csv")
         self.ground = self._csv(f"ground_clearance_{t}.csv")
 
     def _guess_tic(self):
@@ -334,6 +336,30 @@ def _neighbour_hosts(run: Run):
         elif out and not parts:
             break
     return out
+
+
+def _centroid_stars(run: Run, sectors, max_sigma):
+    """Catalogued stars (not the target) within max_sigma of the
+    difference-image centroid in every given sector, brightest first."""
+    if not run.di_stars:
+        return []
+    want = {int(s) for s in sectors}
+    per = {}
+    for r in run.di_stars:
+        try:
+            s = int(float(r["sector"]))
+            if s in want and str(r.get("is_target")) != "True":
+                per.setdefault(r["ID"], {})[s] = (float(r["n_sigma"]),
+                                                  float(r["sep_target_arcsec"]))
+        except (KeyError, ValueError):
+            continue
+    tmag = {r["ID"]: r.get("Tmag", "") for r in (run.field or [])}
+    out = []
+    for sid, d in per.items():
+        if set(d) == want and all(ns < max_sigma for ns, _ in d.values()):
+            out.append(dict(ID=sid, sep=next(iter(d.values()))[1],
+                            Tmag=_f(float(tmag[sid]), "{:.2f}") if tmag.get(sid) else "?"))
+    return sorted(out, key=lambda h: float(h["Tmag"]) if h["Tmag"] != "?" else 99.0)
 
 
 # --------------------------------------------------------------------------
@@ -546,6 +572,7 @@ def skeptic(run: Run, A: Audit, T: dict):
                run.src(lnd) if md else f"{sj}:g_target_range")
 
     # 9. centroids
+    di_hosts = []
     if not run.di:
         A.test("Centroids", "Is the dip on the target?", "NA", "no difference imaging",
                f"difference_imaging_{run.tic}.csv")
@@ -565,9 +592,17 @@ def skeptic(run: Run, A: Audit, T: dict):
             med = float(np.median([v for _, v in vals]))
             hi = [f"s{s}: {v:.1f}" for s, v in vals if v > T["di_sector_warn_sigma"]]
             st = ("FAIL" if med > T["di_median_fail_sigma"] else "WARN" if hi else "PASS")
-            A.test("Centroids", "Is the dip on the target?", st,
-                   f"median offset {med:.1f} sigma over {len(vals)} sectors ({key})"
-                   + (f"; > {T['di_sector_warn_sigma']:g} sigma in {', '.join(hi)}" if hi else ""),
+            txt = (f"median offset {med:.1f} sigma over {len(vals)} sectors ({key})"
+                   + (f"; > {T['di_sector_warn_sigma']:g} sigma in {', '.join(hi)}" if hi else ""))
+            if st != "PASS":
+                di_hosts = _centroid_stars(run, [s for s, _ in vals], T["di_sector_warn_sigma"])
+                if di_hosts:
+                    txt += ("; the centroid is consistent (< "
+                            f"{T['di_sector_warn_sigma']:g} sigma in every sector) with "
+                            + ", ".join(f"TIC {h['ID']} (T = {h['Tmag']}, {h['sep']:.1f}\")"
+                                        for h in di_hosts[:3])
+                            + (f" and {len(di_hosts) - 3} fainter star(s)" if len(di_hosts) > 3 else ""))
+            A.test("Centroids", "Is the dip on the target?", st, txt,
                    f"difference_imaging_{run.tic}.csv")
 
     # 10. neighbours
@@ -579,16 +614,29 @@ def skeptic(run: Run, A: Audit, T: dict):
     if hosts is None and nfpp is None:
         A.test("Neighbours", "Which stars can still host the signal?", "NA",
                "no NFPP input in the log", run.log_name)
-    elif hosts:
-        names = ", ".join(f"TIC {h['ID']} ({h['sep']}\", flux ratio {h['fluxratio']})" for h in hosts)
-        st = "WARN" if (nfpp or 0) > T["nfpp_warn"] else "PASS"
-        A.test("Neighbours", "Which stars can still host the signal?", st,
-               f"NFPP = {_f(nfpp, '{:.3g}')}; possible hosts: {names}", run.src(hosts[0]["line"]),
-               "ground photometry with a separate aperture on each named star clears it")
     else:
-        A.test("Neighbours", "Which stars can still host the signal?", "PASS",
-               f"no neighbour can host the signal (flux budget); NFPP = {_f(nfpp, '{:.3g}')}",
-               run.log_name)
+        # a star the difference image points to but the flux budget leaves out
+        known = {str(h["ID"]) for h in (hosts or [])}
+        missed = [h for h in di_hosts if h["ID"] not in known]
+        miss_txt = ("; difference imaging points to "
+                    + ", ".join(f"TIC {h['ID']} ({h['sep']:.1f}\")" for h in missed[:3])
+                    + ", which the flux budget does not list") if missed else ""
+        miss_adv = (" - and run the flux budget for the star(s) the difference image "
+                    "points to") if missed else ""
+        if hosts:
+            names = ", ".join(f"TIC {h['ID']} ({h['sep']}\", flux ratio {h['fluxratio']})"
+                              for h in hosts)
+            st = "WARN" if (nfpp or 0) > T["nfpp_warn"] or missed else "PASS"
+            A.test("Neighbours", "Which stars can still host the signal?", st,
+                   f"NFPP = {_f(nfpp, '{:.3g}')}; possible hosts: {names}{miss_txt}",
+                   run.src(hosts[0]["line"]),
+                   "ground photometry with a separate aperture on each named star clears it"
+                   + miss_adv)
+        else:
+            A.test("Neighbours", "Which stars can still host the signal?",
+                   "WARN" if missed else "PASS",
+                   f"no neighbour can host the signal (flux budget); NFPP = "
+                   f"{_f(nfpp, '{:.3g}')}{miss_txt}", run.log_name, miss_adv.lstrip(" -"))
 
     # 11. Monte Carlo
     dom = run.S("dominance")

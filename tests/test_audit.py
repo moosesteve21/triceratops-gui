@@ -119,6 +119,22 @@ def test_density_with_unconstrained_b(tmp_path):
     assert t.status == "WARN" and "stellar density" in t.evidence, t.evidence
 
 
+def test_centroid_names_the_star_it_points_to(tmp_path):
+    folder = _make_folder(str(tmp_path), log_extra="NFPP = 0.2 +/- 0.01   [bootstrap over runs]\n")
+    with open(os.path.join(folder, f"difference_imaging_{TIC}.csv"), "w") as fh:
+        fh.write("sector,snr,offset_direct_sigma\n17,6.0,3.8\n24,30.0,4.4\n")
+    with open(os.path.join(folder, f"difference_imaging_stars_{TIC}.csv"), "w") as fh:
+        fh.write("sector,ID,is_target,sep_target_arcsec,n_sigma\n"
+                 f"17,{TIC},True,0.0,3.6\n24,{TIC},True,0.0,4.8\n"
+                 "17,111,False,75.0,0.3\n24,111,False,75.0,0.2\n"      # both sectors
+                 "17,222,False,90.0,0.5\n24,222,False,90.0,5.9\n")     # one sector only
+    with open(os.path.join(folder, f"field_TIC{TIC}.csv"), "w") as fh:
+        fh.write(f"ID,ra,dec,Tmag\n{TIC},0,0,10.5\n111,0,0,9.8\n222,0,0,12.0\n")
+    T = _tests(ta.run_audit(folder, recompute_lc=False))
+    assert "TIC 111 (T = 9.80" in T["Centroids"].evidence and "TIC 222" not in T["Centroids"].evidence
+    assert T["Neighbours"].status == "WARN" and "TIC 111" in T["Neighbours"].evidence
+
+
 def test_audit_never_changes_inputs(tmp_path):
     folder = _make_folder(str(tmp_path))
     before = {f: os.path.getmtime(os.path.join(folder, f)) for f in os.listdir(folder)}
