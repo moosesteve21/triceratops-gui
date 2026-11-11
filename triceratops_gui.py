@@ -102,7 +102,7 @@ def action_help(a) -> str:
 TABS = [
     ("Target & ephemeris", [
         "tic", "mission", "kic", "host_tic", "star_source", "stellar",
-        "outdir", "ephemeris", "blind_search", "p_min", "p_max",
+        "outdir", "ephemeris", "mask_ephemeris", "blind_search", "p_min", "p_max",
         "ephem_search", "no_ephem_scan", "ephem_scan_hours", "ephem_grid_dp",
         "ephem_grid_min_snr", "no_refine_ephemeris", "refine_chi2_max",
         "ephem_adopt_max_sigma", "no_tc_fit"]),
@@ -137,6 +137,7 @@ LABELS = {
     "ephem_grid_min_snr": "Grid min. S/N", "no_refine_ephemeris":
     "Do not refine P, T0 from transits", "refine_chi2_max": "Refine: max chi2_red",
     "ephem_adopt_max_sigma": "Refine: max prediction error [T14]",
+    "mask_ephemeris": "Mask other planets (P T0 T14_h ...)",
     "no_tc_fit": "Fixed mid-times in per-transit fits",
     "lc_source": "Light-curve source", "download_dir": "TESScut cache folder",
     "exclude_sectors": "Exclude sectors", "no_auto_exclude_sectors":

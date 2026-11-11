@@ -497,6 +497,8 @@ class Config:
     # Transits closer than this [d] to a data-segment edge are flagged and the
     # depth and odd/even tests are also reported without them.
     edge_transit_d: float = 0.5
+    # other known planets of the system: [(P, T0, T14_days), ...]
+    mask_ephemerides: tuple = ()
     # The LD fit may overwrite the adopted depth / T14 only if its T0 shift
     # is below this fraction of T14 (a larger shift means the fold is smeared).
     ld_update_max_t0shift: float = 0.15
@@ -2333,6 +2335,23 @@ def transit_edge_distance(time, tcs, gap: float = 0.5):
         out.append(0.0 if k < 0 or tc > ends[k]
                    else float(min(tc - starts[k], ends[k] - tc)))
     return np.array(out)
+
+
+def mask_other_transits(sd: "SectorData", ephemerides, half_width: float = 0.75) -> int:
+    """Drop the cadences within half_width x T14 of the transits of other
+    known planets [(P, T0, T14_days), ...]; returns the number dropped."""
+    t = np.asarray(sd.time, float)
+    keep = np.ones(t.size, bool)
+    for P, T0, dur in ephemerides:
+        ph = (t - T0 + 0.5 * P) % P - 0.5 * P
+        keep &= np.abs(ph) >= half_width * dur
+    n = int((~keep).sum())
+    if n:
+        for name in ("time", "flux", "flux_err", "cen_x", "cen_y"):
+            a = getattr(sd, name)
+            if a is not None and np.size(a) == keep.size:
+                setattr(sd, name, np.asarray(a)[keep])
+    return n
 
 
 def candidate_edge_fraction(time, P, T0, dur, within: float = 0.5,
@@ -7650,6 +7669,16 @@ def main(cfg: Config):
         raise RuntimeError("No usable sectors")
     sectors = np.array([sd.sector for sd in sectors_data])
 
+    if cfg.mask_ephemerides:
+        _log(log, "\n--- Transits of other known planets masked "
+                  "(+-0.75 T14) ---")
+        for P_m, T0_m, d_m in cfg.mask_ephemerides:
+            _log(log, f"  P = {P_m:.6f} d, T0 = {T0_m:.5f}, T14 = {d_m * 24:.2f} h")
+        for sd in sectors_data:
+            n_m = mask_other_transits(sd, cfg.mask_ephemerides)
+            if n_m:
+                _log(log, f"  sector {sd.sector:3d}: {n_m} cadences removed")
+
     # apertures and the target's flux fraction per sector
     _log(log, "\n--- Apertures (target flux fraction g from the catalogue "
               "PSF model) ---")
@@ -8415,6 +8444,12 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Max chi2_red of the linear timing fit before the "
                          "refined ephemeris is rejected (default: 8).  Raise "
                          "for long-period targets with few transits.")
+    ap.add_argument("--mask-ephemeris", type=float, nargs="+", default=None,
+                    metavar="X",
+                    help="Mask the transits of other known planets in the "
+                         "system: P T0 T14_H for each (repeat the three values "
+                         "for more planets; T0 as for --ephemeris).  Cadences "
+                         "within 0.75 x T14 of their mid-times are removed.")
     ap.add_argument("--ephem-adopt-max-sigma", type=float, default=None,
                     metavar="F",
                     help="A refined ephemeris is adopted only if it predicts "
@@ -8625,6 +8660,14 @@ if __name__ == "__main__":
         cfg.refine_chi2_max = float(args.refine_chi2_max)
     if args.ephem_adopt_max_sigma is not None:
         cfg.ephem_adopt_max_sigma = float(args.ephem_adopt_max_sigma)
+    if args.mask_ephemeris:
+        v = args.mask_ephemeris
+        if len(v) % 3:
+            ap.error("--mask-ephemeris needs P T0 T14_H for each planet "
+                     "(a multiple of 3 values)")
+        cfg.mask_ephemerides = tuple(
+            (float(v[i]), float(v[i + 1]) - (TIME_ZERO if v[i + 1] > 2.4e6 else 0.0),
+             float(v[i + 2]) / 24.0) for i in range(0, len(v), 3))
     if getattr(args, "sector_max_rms", None) is not None:
         cfg.sector_max_rms = float(args.sector_max_rms)
     if args.detrend_windows:

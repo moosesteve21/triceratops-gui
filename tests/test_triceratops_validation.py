@@ -123,6 +123,16 @@ def test_refine_from_transits_needs_full_baseline(tmp_path):
     assert r["updated"] is True
 
 
+def test_mask_other_transits():
+    t = np.arange(0.0, 30.0, 0.01)
+    sd = SimpleNamespace(time=t, flux=np.ones(t.size), flux_err=np.ones(t.size),
+                         cen_x=np.zeros(t.size), cen_y=np.zeros(t.size))
+    n = tv.mask_other_transits(sd, [(10.0, 5.0, 0.2)])      # transits at 5, 15, 25
+    assert sd.time.size == t.size - n and 80 < n < 100       # 3 x 0.3 d
+    assert sd.flux.size == sd.cen_y.size == sd.time.size
+    assert np.min(np.abs(((sd.time - 5.0 + 5.0) % 10.0) - 5.0)) >= 0.15 - 1e-9
+
+
 def test_transit_edge_distance():
     t = np.concatenate([np.arange(100.0, 110.0, 0.01), np.arange(110.5, 120.0, 0.01)])
     d = tv.transit_edge_distance(t, [100.2, 105.0, 109.8, 110.7, 130.0])
