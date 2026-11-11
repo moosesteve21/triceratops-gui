@@ -147,12 +147,44 @@ def test_centroid_names_the_star_it_points_to(tmp_path):
     T = _tests(ta.run_audit(folder, recompute_lc=False))
     assert "TIC 111 (T = 9.80" in T["Centroids"].evidence and "TIC 222" not in T["Centroids"].evidence
     assert T["Neighbours"].status == "WARN" and "TIC 111" in T["Neighbours"].evidence
-    # a marginal offset (WARN, median < 3 sigma) names no stars
+    # a marginal offset (WARN, median < 3 sigma) that no star fits clearly
+    # better than the target names no stars
     with open(os.path.join(folder, f"difference_imaging_{TIC}.csv"), "w") as fh:
         fh.write("sector,snr,offset_direct_sigma\n17,6.0,0.6\n24,30.0,3.4\n")
+    with open(os.path.join(folder, f"difference_imaging_stars_{TIC}.csv"), "w") as fh:
+        fh.write("sector,ID,is_target,sep_target_arcsec,n_sigma\n"
+                 f"17,{TIC},True,0.0,0.6\n24,{TIC},True,0.0,3.4\n"
+                 "17,111,False,8.0,1.5\n24,111,False,8.0,2.0\n")
     T = _tests(ta.run_audit(folder, recompute_lc=False))
-    assert T["Centroids"].status == "WARN" and "consistent" not in T["Centroids"].evidence
+    assert T["Centroids"].status == "WARN" and "TIC 111" not in T["Centroids"].evidence
     assert T["Neighbours"].status == "PASS", T["Neighbours"].evidence
+
+
+def _centroid_folder(tmp, target_sigma, star_sigma):
+    folder = _make_folder(tmp, log_extra="NFPP = 0.2 +/- 0.01   [bootstrap over runs]\n")
+    secs = (7, 8, 34, 35, 61)
+    with open(os.path.join(folder, f"difference_imaging_{TIC}.csv"), "w") as fh:
+        fh.write("sector,snr,offset_direct_sigma\n"
+                 + "".join(f"{s},5.0,{v}\n" for s, v in zip(secs, target_sigma)))
+    with open(os.path.join(folder, f"difference_imaging_stars_{TIC}.csv"), "w") as fh:
+        fh.write("sector,ID,is_target,sep_target_arcsec,n_sigma\n"
+                 + "".join(f"{s},{TIC},True,0.0,{v}\n" for s, v in zip(secs, target_sigma))
+                 + "".join(f"{s},111,False,50.0,{v}\n" for s, v in zip(secs, star_sigma)))
+    with open(os.path.join(folder, f"field_TIC{TIC}.csv"), "w") as fh:
+        fh.write(f"ID,ra,dec,Tmag\n{TIC},0,0,10.5\n111,0,0,13.9\n")
+    return _tests(ta.run_audit(folder, recompute_lc=False))
+
+
+def test_centroid_offsets_combined_over_sectors(tmp_path):
+    # every sector alone is below 3 sigma, but all five point to the same
+    # star: combined, the target is excluded and that star fits
+    T = _centroid_folder(str(tmp_path), (2.5, 2.8, 2.2, 2.6, 2.9), (0.3, 0.4, 0.2, 0.5, 0.3))
+    t = T["Centroids"]
+    assert t.status == "FAIL" and "combined" in t.evidence and "TIC 111" in t.evidence, t.evidence
+    assert T["Neighbours"].status == "WARN" and "TIC 111" in T["Neighbours"].evidence
+    # the same offsets with no star that fits them (scatter, not a blend)
+    T = _centroid_folder(str(tmp_path), (2.5, 2.8, 2.2, 2.6, 2.9), (2.9, 3.5, 2.4, 3.1, 2.7))
+    assert T["Centroids"].status != "FAIL" and "TIC 111" not in T["Centroids"].evidence
 
 
 def test_audit_never_changes_inputs(tmp_path):

@@ -60,6 +60,8 @@ THRESHOLDS = {
     "di_sector_warn_sigma": 3.0,
     "di_median_fail_sigma": 3.0,
     "di_min_snr": 3.0,
+    "di_star_min_p": 0.01,            # chi2 p-value for a star to fit the centroids
+    "di_star_dchi2": 9.0,             # ... and how much better than the target
     "nfpp_warn": 0.01,
     "dominance_warn": 0.2,
     "valid_frac_warn": 0.8,
@@ -362,6 +364,45 @@ def _centroid_stars(run: Run, sectors, max_sigma):
     return sorted(out, key=lambda h: float(h["Tmag"]) if h["Tmag"] != "?" else 99.0)
 
 
+def _centroid_combined(run: Run, vals, T: dict):
+    """Combine the sectors' centroid offsets.
+
+    Returns (z, stars): z is the significance (Gaussian sigma) at which the
+    target is excluded as the source, from chi2 = sum of the per-sector
+    offsets^2 over k sectors; stars are catalogued stars whose chi2 over the
+    same sectors is acceptable (p > di_star_min_p) and below the target's by
+    at least di_star_dchi2, brightest first.  Low-S/N sectors that each sit
+    under 3 sigma but all point to the same star are caught this way, while
+    scatter that no star fits better than the target is not.
+    """
+    from scipy import stats
+    k = len(vals)
+    chi_t = float(sum(v * v for _, v in vals))
+    p_t = float(stats.chi2.sf(chi_t, k))
+    z = float(stats.norm.isf(0.5 * p_t)) if p_t > 0 else float("inf")
+    want = {int(s) for s, _ in vals}
+    per = {}
+    for r in run.di_stars or []:
+        try:
+            s = int(float(r["sector"]))
+            if s in want and str(r.get("is_target")) != "True":
+                per.setdefault(r["ID"], {})[s] = (float(r["n_sigma"]),
+                                                  float(r["sep_target_arcsec"]))
+        except (KeyError, ValueError):
+            continue
+    tmag = {r["ID"]: r.get("Tmag", "") for r in (run.field or [])}
+    out = []
+    for sid, d in per.items():
+        if set(d) != want:
+            continue
+        chi_s = float(sum(ns * ns for ns, _ in d.values()))
+        if (np.isfinite(chi_s) and stats.chi2.sf(chi_s, k) > T["di_star_min_p"]
+                and chi_t - chi_s >= T["di_star_dchi2"]):
+            out.append(dict(ID=sid, sep=next(iter(d.values()))[1], chi2=chi_s,
+                            Tmag=_f(float(tmag[sid]), "{:.2f}") if tmag.get(sid) else "?"))
+    return z, sorted(out, key=lambda h: float(h["Tmag"]) if h["Tmag"] != "?" else 99.0)
+
+
 # --------------------------------------------------------------------------
 # Skeptic: tests that try to break the claim
 # --------------------------------------------------------------------------
@@ -617,6 +658,17 @@ def skeptic(run: Run, A: Audit, T: dict):
                             + ", ".join(f"TIC {h['ID']} (T = {h['Tmag']}, {h['sep']:.1f}\")"
                                         for h in di_hosts[:3])
                             + (f" and {len(di_hosts) - 3} fainter star(s)" if len(di_hosts) > 3 else ""))
+            else:
+                z, pref = _centroid_combined(run, vals, T)
+                if pref and z > T["di_median_fail_sigma"]:
+                    st, di_hosts = "FAIL", pref
+                    k = len(vals)
+                    txt += (f"; combined over the {k} sectors the target is excluded at "
+                            + (f"{z:.1f}" if np.isfinite(z) else "> 37") + " sigma, and "
+                            + ", ".join(f"TIC {h['ID']} (T = {h['Tmag']}, {h['sep']:.1f}\", "
+                                        f"chi2 {h['chi2']:.1f} for {k})" for h in pref[:3])
+                            + (f" and {len(pref) - 3} more star(s)" if len(pref) > 3 else "")
+                            + " fit the centroids better")
             A.test("Centroids", "Is the dip on the target?", st, txt,
                    f"difference_imaging_{run.tic}.csv")
 
