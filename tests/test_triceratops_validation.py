@@ -545,3 +545,17 @@ def test_run_triceratops_converges_classes_and_exptime(tmp_path, monkeypatch):
     assert cls and abs(sum(cls.values()) - 1.0) < 1e-6
     eb = [v for k, v in cls.items() if k.startswith("eclipsing binary")][0]
     assert eb > 0.99
+
+
+def test_sectors_with_too_few_cadences_are_dropped(tmp_path):
+    """An empty sector (target off the illuminated CCD area) is left out."""
+    full = SimpleNamespace(sector=36, time=np.arange(500.0))
+    empty = SimpleNamespace(sector=90, time=np.array([]))
+    sparse = SimpleNamespace(sector=91, time=np.arange(20.0))
+    logf = tmp_path / "log.txt"
+    with open(logf, "w") as fh:
+        kept = tv.drop_sparse_sectors([full, empty, sparse], 100, fh)
+    assert [sd.sector for sd in kept] == [36]
+    text = logf.read_text()
+    assert "sector 90: only 0 usable cadences" in text
+    assert "sector 91: only 20 usable cadences" in text

@@ -559,6 +559,10 @@ class Config:
     # (lost to gaps, or to the masked transits of other planets) are flagged
     # the same way.
     min_transit_coverage: float = 0.7
+    # Sectors left with fewer usable cadences than this after extraction
+    # (e.g. a cutout where the target falls off the illuminated CCD area)
+    # are dropped with a note instead of stopping the run.
+    min_sector_cadences: int = 100
     # other known planets of the system: [(P, T0, T14_days), ...]
     mask_ephemerides: tuple = ()
     # The LD fit may overwrite the adopted depth / T14 only if its T0 shift
@@ -7805,6 +7809,24 @@ def _log(fh, text):
         print(text, file=fh)
 
 
+def drop_sparse_sectors(sectors_data, min_cadences, log=None):
+    """Return the sectors with at least `min_cadences` usable cadences.
+
+    A sector whose extraction kept (almost) nothing - for example a cutout in
+    which the target lies off the illuminated CCD area - cannot be detrended,
+    plotted or fitted, so it is left out with a note in the log.
+    """
+    keep = []
+    for sd in sectors_data:
+        n = int(np.size(sd.time))
+        if n < min_cadences:
+            _log(log, f"  ! sector {sd.sector}: only {n} usable cadences after "
+                      f"extraction (minimum {min_cadences}); sector left out")
+        else:
+            keep.append(sd)
+    return keep
+
+
 # --------------------------------------------------------------------------
 # Main
 # --------------------------------------------------------------------------
@@ -7914,6 +7936,7 @@ def main(cfg: Config):
             sectors_data.append(extract_sector(tic, int(s), cfg))
         except Exception as exc:
             print(f"  ! sector {s} failed: {exc}")
+    sectors_data = drop_sparse_sectors(sectors_data, cfg.min_sector_cadences, log)
     if not sectors_data:
         raise RuntimeError("No usable sectors")
     sectors = np.array([sd.sector for sd in sectors_data])
