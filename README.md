@@ -4,12 +4,14 @@ Statistical validation of **TESS** and **Kepler** planet candidates with [TRICER
 
 | Component | File | Version |
 |-----------|------|---------|
-| Pipeline | `triceratops_validation.py` | **4.2** |
+| Pipeline | `triceratops_validation.py` | **4.3** |
 | GUI | `triceratops_gui.py` | **1.2** |
 | Audit (prototype) | `triceratops_audit.py` | 0.1 |
+| Follow-up recommendations | `triceratops_recommend.py` | — |
+| Batch runs | `triceratops_batch.py` | — |
 
-Observer-oriented documentation: **Observer’s Guide** (PDF) + Kepler update addendum.  
-Full methods and tests: technical manual (separate PDF).
+Observer-oriented documentation: **Observer’s Guide v4.3** (`TRICERATOPS_Observers_Guide.pdf`, LaTeX sources in `observers_guide/`).  
+Full methods and tests: technical manual (`TRICERATOPS_Validation_Pipeline_Documentation.pdf`).
 
 **Author / contact:** Siegfried Vanaverbeke  
 GitHub: [@svaverbe](https://github.com/svaverbe) · Repository: [triceratops-gui](https://github.com/svaverbe/triceratops-gui)  
@@ -19,7 +21,17 @@ E-mail: [siegfriedvanaverbeke@gmail.com](mailto:siegfriedvanaverbeke@gmail.com)
 
 ### Summary
 
-This repository provides a pipeline for the **statistical validation** of TESS and Kepler planet candidates with TRICERATOPS. It builds light curves, runs diagnostic tests (odd/even, secondary eclipse, ETV, difference imaging, …), computes false-positive probabilities (FPP/NFPP), and can include ground-based photometry (AAVSO, AstroImageJ, …) to clear nearby stars. A graphical interface (`triceratops_gui.py`) and a post-run audit script are included. From version 4.2, **Kepler** targets are supported (`--mission kepler --kic`). See the Observer’s Guide and the Kepler addendum for observer-oriented documentation.
+This repository provides a pipeline for the **statistical validation** of TESS and Kepler planet candidates with TRICERATOPS. It builds light curves, runs diagnostic tests (odd/even, secondary eclipse, ETV, difference imaging, …), computes false-positive probabilities (FPP/NFPP), and can include ground-based photometry (AAVSO, AstroImageJ, …) to clear nearby stars. A graphical interface (`triceratops_gui.py`) and a post-run audit script are included. From version 4.2, **Kepler** targets are supported (`--mission kepler --kic`). See the Observer’s Guide for observer-oriented documentation.
+
+---
+
+## New in version 4.3
+
+- **Audit with recommendations.** `triceratops_audit.py` tries to break the claim of a run (17 deterministic tests) and lists, from the TRICERATOPS scenario probabilities, which follow-up observation would lower the FPP most: high-resolution imaging, ground photometry with separate apertures, transits in two or more filters, or reconnaissance spectroscopy (`triceratops_recommend.py`; also written to `recommendations_<TIC>.txt`).
+- **Multi-band ground photometry.** The colour test (intrinsic depth per band, $\chi^2$ test and red/blue ratio) and the use of the light curves by TRICERATOPS+ are recorded in `summary_<TIC>.json`; the audit test *Multi-band* states which false-positive scenarios the colours rule out and whether the FPP already includes the ground data.
+- **Companions limited by Gaia (MOLUSC).** `--molusc-file`, `--molusc-n`, `--molusc-multiplicity`: the bound companions still allowed by Gaia RUWE and Gaia imaging (MOLUSC, Wood et al. 2021) replace the default companion prior. A patched copy of MOLUSC is in `MOLUSC/` (see `MOLUSC/README_pipeline.txt`).
+- **Robustness fixes** found with test targets: ephemeris refinement in the blind search, per-transit template, secondary-eclipse centre on stars with a phase curve, hot-planet occultations not counted as EB evidence, difference imaging in sectors with scattered light, limb-darkened fit with a stellar-density prior when the free fit is implausible, `--bin-minutes` for the TRICERATOPS fold, audit that leaves out the sectors the pipeline excluded.
+- **Worked examples in the Observer’s Guide:** TIC 65344135 (AAVSO campaign 942), WASP-18 b (control target with its occultation), TIC 229701403 (two candidates that are one eccentric eclipsing binary on a neighbour), L 279-94 (M-dwarf candidate; default vs Gaia-limited companions).
 
 ---
 
@@ -128,7 +140,7 @@ Related options:
 | `--star-source tic\|kepler` | Source of R, M, Teff, logg |
 | `--stellar R M Teff [logg]` | Manual stellar parameters |
 
-See the **Kepler update addendum** (PDF) for the full observer-facing description.
+See the chapter *Kepler targets* of the Observer’s Guide.
 
 ---
 
@@ -140,7 +152,20 @@ See the **Kepler update addendum** (PDF) for the full observer-facing descriptio
 ```
 
 Supported formats: AstroImageJ tables, AAVSO/EXOTIC reports, simple time/flux/error tables.  
-Stars inconsistent with the observed depth are cleared before `calc_probs`; with TRICERATOPS+ the light curves can enter the likelihood (`--tri-plus auto|on|off`).
+Stars inconsistent with the observed depth are cleared before `calc_probs`; with TRICERATOPS+ the light curves can enter the likelihood (`--tri-plus auto|on|off`).  
+Only `g r i z J H K` (and Rc, Ic) are TRICERATOPS+ bands; B, V and clear-filter light curves enter the clearance and the colour test.
+
+---
+
+## Companions limited by Gaia (MOLUSC)
+
+```bash
+bash MOLUSC/run_molusc_L27994.sh          # example script; needs access to the Gaia archive or VizieR
+python triceratops_validation.py ... \
+  --molusc-file TIC100796276_molusc/L27994_N1000000_kept.csv --molusc-n 1000000
+```
+
+TRICERATOPS uses only the MOLUSC companions whose periastron is beyond 10 au and treats closer binaries as planet-free; report an FPP obtained this way together with that assumption (Observer’s Guide, Section 5.4).
 
 ---
 
@@ -151,13 +176,26 @@ Stars inconsistent with the observed depth are cleared before `calc_probs`; with
 ├── triceratops_validation.py   # main pipeline
 ├── triceratops_gui.py          # Tkinter front-end
 ├── triceratops_audit.py        # post-run audit
+├── triceratops_recommend.py    # next-observation recommendations
+├── triceratops_batch.py        # batch runs from a JSON list
+├── requirements.txt
 ├── profiles/                   # saved GUI profiles (JSON)
 ├── tests/                      # pytest regression tests
-├── README.md
-└── docs/                       # optional: Observer’s Guide + addendum PDFs
+├── MOLUSC/                     # MOLUSC (Wood et al. 2021, MIT) with small patches
+├── observers_guide/            # LaTeX sources of the Observer’s Guide
+├── TIC65344135/                # example output (AAVSO campaign 942)
+├── TRICERATOPS_Observers_Guide.pdf
+├── TRICERATOPS_Validation_Pipeline_Documentation.pdf
+└── README.md
 ```
 
 Large data products (cutouts, run outputs, TRILEGAL tables) should stay out of git (see `.gitignore`).
+
+---
+
+## Acknowledgements
+
+Steve Price tested the pipeline independently with his own pipeline (KESTREL) and contributed `triceratops_batch.py` and `requirements.txt`. MOLUSC is by Mackenna L. Wood (MIT licence, included in `MOLUSC/`).
 
 ---
 
@@ -166,6 +204,7 @@ Large data products (cutouts, run outputs, TRILEGAL tables) should stay out of g
 If you use this pipeline in a publication, please cite:
 
 - Giacalone et al. (2021), *TRICERATOPS*, [AJ](https://ui.adsabs.harvard.edu/abs/2021AJ....161...24G)
+- Wood, Mann & Kraus (2021), *MOLUSC*, AJ 162, 128 — when `--molusc-file` is used
 - and the specific version of this pipeline (version string is written into every log and `summary_*.json`).
 
 ---

@@ -1,0 +1,16 @@
+{
+  "gui_version": "1.2",
+  "description": "WASP-18b (TIC 100100827) - confirmed hot Jupiter, control target: blind TLS search; expect P = 0.94145 d, ~0.95 % deep, T14 ~2.2 h, secondary eclipse ~340 ppm (planet occultation), verdict PASSED",
+  "options": {
+    "tic": "100100827",
+    "outdir": "WASP18b",
+    "blind_search": true,
+    "p_min": "0.5",
+    "p_max": "10",
+    "ld_fit": true,
+    "vet_neighbours": true,
+    "sensitivity": true,
+    "red_noise_scrambles": "2000"
+  },
+  "ground": []
+}

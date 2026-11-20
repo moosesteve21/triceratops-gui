@@ -1,0 +1,21 @@
+{
+  "gui_version": "1.2",
+  "description": "L 279-94 (TIC 100796276), same as profile_TIC100796276 but with 5-min bins for TRICERATOPS (the ingress lasts ~11 min; Rabtsevich 2026, Zenodo: FPP depends on the bin width). Output in TIC100796276_bin5",
+  "options": {
+    "tic": "100796276",
+    "ephemeris": [
+      "18.15219",
+      "2036.9763",
+      "3200",
+      "2.4"
+    ],
+    "ephem_scan_hours": "3",
+    "ld_fit": true,
+    "vet_neighbours": true,
+    "sensitivity": true,
+    "red_noise_scrambles": "2000",
+    "bin_minutes": "5",
+    "outdir": "TIC100796276_bin5"
+  },
+  "ground": []
+}

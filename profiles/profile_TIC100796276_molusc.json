@@ -1,0 +1,22 @@
+{
+  "gui_version": "1.2",
+  "description": "L 279-94 (TIC 100796276) with the bound companions limited by Gaia (MOLUSC: RUWE + Gaia contrast). First run MOLUSC/run_molusc_L27994.sh (WSL, internet); output in TIC100796276_molusc. 10-min bins; multiplicity 1 (conservative)",
+  "options": {
+    "tic": "100796276",
+    "ephemeris": [
+      "18.15219",
+      "2036.9763",
+      "3200",
+      "2.4"
+    ],
+    "ephem_scan_hours": "3",
+    "ld_fit": true,
+    "vet_neighbours": true,
+    "sensitivity": true,
+    "red_noise_scrambles": "2000",
+    "outdir": "TIC100796276_molusc",
+    "molusc_file": "TIC100796276_molusc/L27994_N1000000_kept.csv",
+    "molusc_n": "1000000"
+  },
+  "ground": []
+}

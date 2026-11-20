@@ -1,0 +1,1336 @@
+\documentclass[11pt,a4paper]{report}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=2.3cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs,longtable,array}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{tikz}
+\usetikzlibrary{positioning,arrows.meta,shapes.geometric}
+\PassOptionsToPackage{obeyspaces}{url}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black]{hyperref}
+\setlength{\parskip}{0.55em}
+\setlength{\parindent}{0pt}
+\makeatletter
+\g@addto@macro\UrlBreaks{\do\_\do\-\do\,\do\=\do\<\do\>\do\ }
+\makeatother
+\urlstyle{tt}
+\newcommand{\code}[1]{\path{#1}}
+\sloppy
+\emergencystretch=3em
+\lstset{basicstyle=\ttfamily\footnotesize,breaklines=true,columns=fullflexible,
+  frame=single,framerule=0.3pt,rulecolor=\color[gray]{0.6},xleftmargin=2pt,xrightmargin=2pt,
+  aboveskip=0.8em,belowskip=0.6em,showstringspaces=false}
+\newenvironment{tip}{\begin{center}\begin{tabular}{|p{0.92\textwidth}|}\hline\small\textbf{Tip.}~}{\\\hline\end{tabular}\end{center}}
+\setcounter{secnumdepth}{2}
+\setcounter{tocdepth}{1}
+
+\title{\textbf{Statistical validation of TESS and Kepler candidates}\\[0.4em]
+\Large TRICERATOPS validation pipeline --- Observer's Guide\\[0.3em]
+\large with the graphical user interface}
+\date{Pipeline \texttt{triceratops\_validation.py} v4.3 \quad GUI \texttt{triceratops\_gui.py} v1.2 \quad Audit \texttt{triceratops\_audit.py} v0.1\\[0.3em] November 2026}
+\author{}
+
+\input{glyphtounicode}
+\pdfgentounicode=1
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This guide is written for observers and collaborators who want to use the
+validation pipeline without reading its 170-page technical manual. Part~I
+explains what TRICERATOPS computes, which false-positive scenarios it
+considers, what the pipeline adds around it, how ground-based photometry
+enters the analysis, and how the audit turns the result into a recommendation
+for the next observations. Part~II explains the graphical user interface (GUI)
+with a worked example, the AAVSO campaign 942 on TIC~65344135, gives the
+TESS-only result for that star and its recommended follow-up, tests the
+pipeline on the known hot Jupiter WASP-18~b, unmasks the two candidates of
+TIC~229701403 as one eccentric eclipsing binary, discusses the M-dwarf
+candidate L~279-94 and its habitable-zone question, and shows how Kepler
+targets are analysed. It ends with a complete reference of all
+options, the output files and common problems. The technical manual
+(\code{TRICERATOPS_Validation_Pipeline_Documentation_v4.3.pdf}) remains the
+reference for the methods and their tests.
+
+\textbf{New in v4.3:} Kepler targets (v4.2); fixes from the independent test
+runs of Steve Price (KESTREL); a verdict that also listens to the pipeline's
+own eclipsing-binary tests; the audit with its page \emph{Next observations}
+(Chapter~\ref{ch:followup}); the control target WASP-18~b with its
+secondary eclipse (Chapter~\ref{ch:wasp18}); the false positive
+TIC~229701403 (Chapter~\ref{ch:tic2297}); the M-dwarf candidate L~279-94
+(Chapter~\ref{ch:l27994}); multi-band light curves with
+TRICERATOPS+ and the audit's colour test (Section~\ref{sec:multiband}).
+\end{abstract}
+
+\tableofcontents
+
+%% ======================================================================
+\part{Background}
+%% ======================================================================
+
+\chapter{Why statistical validation?}
+
+A transit candidate is a periodic dip in a light curve. A planet crossing its
+star produces such a dip, but so do several other configurations:
+\begin{itemize}
+\item an eclipsing binary star (EB) whose eclipses are grazing or diluted;
+\item an eclipsing binary in the background, whose light is mixed with that
+of the target (blend);
+\item a planet or EB around a fainter star physically bound to the target;
+\item an eclipsing binary on a nearby star a few arcseconds away, inside the
+same 21$''$ TESS pixel (nearby eclipsing binary, NEB).
+\end{itemize}
+For many TESS candidates, especially faint stars and long periods, the
+planet's mass cannot be measured with radial velocities. \emph{Statistical
+validation} then asks: given everything we know about the star, its
+surroundings and the shape of the light curve, how probable is it that the
+signal is a planet on the target?
+
+\section*{What this pipeline does}
+\code{triceratops_validation.py} prepares the TESS data, checks the candidate
+with a series of diagnostic tests, and then calls the TRICERATOPS package
+(Giacalone et al.\ 2021) to compute the false-positive probabilities. Since
+version~4.1 it also uses ground-based light curves, for example from an AAVSO
+campaign, to rule out nearby stars and to test the colour dependence of the
+depth. The GUI \code{triceratops_gui.py} lets you set all of this up in a
+window, run it and look at the results.
+
+%% ----------------------------------------------------------------------
+\chapter{How TRICERATOPS works}
+
+\section{Scenarios}
+
+TRICERATOPS (Tool for Rating Interesting Candidate Exoplanets and Reliability
+Analysis of Transits Originating from Proximate Stars) compares the observed
+transit with a set of astrophysical \emph{scenarios}. Each scenario is a
+possible origin of the dip:
+
+\begin{longtable}{@{}p{0.17\textwidth}p{0.76\textwidth}@{}}
+\toprule
+\textbf{Scenario} & \textbf{Meaning}\\
+\midrule\endhead
+TP & Transiting planet on the target star.\\
+EB & Eclipsing binary: the target itself is an eclipsing binary.\\
+EBx2P & The same at twice the period: two nearly equal eclipses per orbit are seen as one ``transit'' at half the true period.\\
+PTP, PEB, PEBx2P & The target has an unresolved, physically bound companion; the planet or EB is on the \emph{primary} (the target) and the companion dilutes the dip.\\
+STP, SEB, SEBx2P & The planet or EB is on the unresolved bound \emph{secondary} star.\\
+DTP, DEB, DEBx2P & Planet or EB on the target, diluted by an unresolved chance-aligned (\emph{diluting}) background or foreground star.\\
+BTP, BEB, BEBx2P & Planet or EB on that unresolved \emph{background} star.\\
+NTP, NEB, NEBx2P & Planet or EB on a \emph{nearby} star that is in the TIC and lies within the TESS aperture region (resolved by Gaia, not by TESS).\\
+\bottomrule
+\end{longtable}
+
+Only TP, PTP and DTP put a planet on the target. All other scenarios are
+false positives.
+
+\section{Probabilities}
+
+For each scenario $S$, TRICERATOPS computes a probability proportional to
+\[
+P(S \mid \text{data}) \;\propto\; p(S)\,\int L(\text{data}\mid\theta,S)\,p(\theta\mid S)\,d\theta .
+\]
+\begin{description}
+\item[Prior $p(S)$.] How common the configuration is:
+\begin{itemize}
+\item the occurrence rates of planets as a function of period and size;
+\item the statistics of stellar companions, as a function of separation and
+mass ratio;
+\item the density of background stars from a synthetic model of the Galaxy
+(TRILEGAL) for the area of the aperture.
+\end{itemize}
+\item[Likelihood $L$.] How well a light-curve model of that scenario fits the
+folded TESS light curve. The models include limb darkening and the dilution by
+the other stars in the aperture.
+\item[Integral.] It runs over the unknown parameters $\theta$: radius of the
+planet or companion star, impact parameter, eccentricity, the properties of
+the host star, and so on. It is evaluated by Monte Carlo: many random draws
+of $\theta$, typically a million, for which the model light curves are
+compared with the data.
+\end{description}
+
+The results are summarised in two numbers:
+\begin{align*}
+\text{FPP} &= 1 - \big(P_{\rm TP} + P_{\rm PTP} + P_{\rm DTP}\big), &
+\text{NFPP} &= \sum P_{\rm NTP,\,NEB,\,NEBx2P}.
+\end{align*}
+FPP is the probability that the signal is \emph{not} a planet on the target.
+NFPP is the part of it due to resolved nearby stars.
+
+\section{When is a candidate ``validated''?}
+
+Following Giacalone et al.\ (2021), the pipeline reports \textbf{PASSED} when
+\[
+\text{FPP} < 0.015 \quad\text{and}\quad \text{NFPP} < 0.001 .
+\]
+Other combinations mean:
+\begin{itemize}
+\item FPP $<0.5$ with NFPP $<0.001$: a \emph{likely planet};
+\item NFPP $>0.1$: a likely nearby false positive.
+\end{itemize}
+A ``PASSED'' is a statistical statement. It is meaningful only when the
+diagnostic tests below show nothing suspicious, and it is no substitute for
+follow-up observations. These criteria were designed together with
+TESS follow-up practice: ground-based photometry to clear nearby stars,
+high-resolution imaging (contrast curves) against close companions, and
+reconnaissance spectroscopy.
+
+\section{What lowers the false-positive probability}
+
+\begin{description}
+\item[A clean transit shape.] A flat-bottomed U-shaped transit of the right
+duration for the star fits TP well and EB poorly. A V-shaped (grazing)
+dip does the opposite.
+\item[A precise depth and a correct dilution.] The depth determines the
+radius of the occulting body. If the dilution by neighbours is wrong, the
+radius is wrong.
+\item[High-resolution imaging.] A contrast curve
+(\code{--contrast-curve}) limits the brightness of unresolved companions and
+background stars close to the target. It lowers the P*, S*, D* and B*
+scenarios.
+\item[Ground-based photometry.] A light curve that resolves the field shows
+\emph{which} star dims. Stars shown not to vary are removed from the
+analysis, which removes their NTP/NEB scenarios and usually brings NFPP close
+to zero (Chapter~\ref{ch:ground}). With TRICERATOPS+ the multi-colour light
+curves also enter the likelihood.
+\end{description}
+
+\section{Limitations}
+
+\begin{itemize}
+\item The Monte Carlo has noise. One run can be dominated by a lucky draw.
+The pipeline therefore repeats \code{calc_probs}, pools the evidences and
+adds runs until no single run dominates.
+\item The priors assume ``typical'' stars and planets; unusual systems are
+not well represented.
+\item With only a few transits, a long period or a shallow depth, the folded
+light curve constrains the shape poorly, and the FPP becomes uncertain.
+\item An FPP close to 1 with an EB scenario on top, as for TIC~229788204,
+is a strong indication of a stellar eclipse, but radial velocities are needed
+to measure the masses.
+\end{itemize}
+
+%% ----------------------------------------------------------------------
+\chapter{What the pipeline does around TRICERATOPS}
+\label{ch:pipeline}
+
+TRICERATOPS needs a good folded light curve, a correct depth and the pixels of
+the aperture. The pipeline prepares these and runs independent diagnostic
+tests:
+
+\begin{center}
+\begin{tikzpicture}[node distance=4mm and 6mm,
+  box/.style={draw,rounded corners,fill=blue!6,align=left,font=\small,text width=6.2cm,inner sep=4pt},
+  gbox/.style={draw,rounded corners,fill=green!8,align=left,font=\small,text width=6.2cm,inner sep=4pt},
+  tbox/.style={draw,rounded corners,fill=orange!12,align=left,font=\small,text width=6.2cm,inner sep=4pt},
+  arr/.style={-{Stealth[length=2mm]}}]
+\node[box] (a) {\textbf{1. TESS or Kepler data}: FFI cutouts (TESScut) or SPOC light curves per sector; Kepler light curves and pixel files per quarter; aperture chosen for the best S/N of the target.};
+\node[box,below=of a] (b) {\textbf{2. Dilution and detrending}: each sector put on the target's flux scale; trends removed with the transits masked.};
+\node[box,below=of b] (c) {\textbf{3. Ephemeris}: blind TLS search, or check and refinement of a known P, T0 (per-transit scan, grid search).};
+\node[box,below=of c] (d) {\textbf{4--5. Per-transit fits}: depth and mid-time of every transit; odd/even depths; depth consistency.};
+\node[box,below=of d] (e) {\textbf{5c. Secondary eclipse} at all phases (eccentric orbits); brightness-temperature limit.};
+\node[box,below=of e] (f) {\textbf{7. Folded light curve}: limb-darkened fit (shape, grazing?), flux uncertainty, timing (ETV).};
+\node[gbox,right=of d] (g) {\textbf{7d/8c. Ground photometry}: fit of each light curve, flux fractions of all stars in the ground aperture, clearance of nearby stars, colour test, mid-times.};
+\node[box,below=of f] (h) {\textbf{8. Field}: TRICERATOPS star table; difference imaging (where is the dip on the sky?); neighbours' own light curves.};
+\node[tbox,below=of h] (i) {\textbf{8. TRICERATOPS}: FPP, NFPP, scenario probabilities; repeated runs until converged; verdict.};
+\node[box,right=of i] (j) {\textbf{Summary}: log, figures, \texttt{summary\_<TIC>.json}; \textbf{next observations} (Ch.~\ref{ch:followup}); optional \textbf{audit}.};
+\draw[arr] (a)--(b); \draw[arr] (b)--(c); \draw[arr] (c)--(d); \draw[arr] (d)--(e);
+\draw[arr] (e)--(f); \draw[arr] (f)--(h); \draw[arr] (h)--(i); \draw[arr] (i)--(j);
+\draw[arr] (f.east) -| (g.south);
+\draw[arr] (g.south) |- (h.east);
+\end{tikzpicture}
+\end{center}
+
+The diagnostic tests and what they reveal:
+
+\begin{longtable}{@{}p{0.26\textwidth}p{0.67\textwidth}@{}}
+\toprule
+\textbf{Test} & \textbf{What a failure indicates}\\
+\midrule\endhead
+Odd/even depths & Different depths of alternating transits: an EB at twice the period.\\
+Secondary eclipse & A dip elsewhere in the orbit: light from a self-luminous companion, so an EB. The limit gives a maximum temperature of the companion.\\
+Limb-darkened fit & V shape, $b + k > 1$ (grazing), or a stellar density inconsistent with the star: EB or wrong host.\\
+Difference imaging & The dip is centred on a neighbour instead of the target: NEB.\\
+Neighbour vetting & A neighbour's own TESS light curve shows the dip more deeply.\\
+Per-transit depths & Depths that differ between sectors: wrong dilution or a blend.\\
+Timing (ETV) & Mid-time variations: a third body, or a wrong period.\\
+Ground photometry & The dip on the ``wrong'' star, a wrong depth, or a colour-dependent depth (Chapter~\ref{ch:ground}).\\
+\bottomrule
+\end{longtable}
+
+\section*{How the verdict is formed (v4.3)}
+TRICERATOPS only sees the folded transit; it does not see the pipeline's own
+tests. Since v4.3 the verdict therefore has two parts:
+\begin{itemize}
+\item \textbf{the criteria of Giacalone et al.\ (2021):} FPP $<0.015$ and
+NFPP $<0.001$ (Chapter~2);
+\item \textbf{the pipeline's own evidence against a planet at this period:}
+a secondary eclipse that is too deep or too hot for a planet, odd and even
+depths that differ by more than 3$\sigma$, or no transit at all at the odd
+(or even) epochs, which means that the period is twice the input.
+\end{itemize}
+When the criteria are met but such evidence exists, the verdict is ``NOT
+passed'' with the reason. A \emph{shallow, cool} secondary eclipse (less than
+10\% of the transit depth and a brightness temperature below 4000~K) is
+\emph{not} used against the planet: hot Jupiters such as WASP-18b show their
+own occultation behind the star. The log then adds a note that a mass (radial
+velocities) decides. \code{--no-eb-veto} switches this rule off.
+
+Two other safeguards of v4.3 concern the depth and the ephemeris:
+\begin{itemize}
+\item the depth of the limb-darkened fit replaces the measured depth only when
+the impact parameter $b$ is constrained and both depths agree within
+3$\sigma$; otherwise the measured (per-transit) depth goes to TRICERATOPS;
+\item a refined ephemeris is adopted only when it predicts every epoch with
+data to better than a quarter of the transit duration; otherwise the folded
+grid search decides.
+\end{itemize}
+
+%% ----------------------------------------------------------------------
+\chapter{Ground-based observations in the analysis}
+\label{ch:ground}
+
+\section{The blending problem}
+
+A TESS pixel is 21$''$ wide and the TESS point-spread function covers a few
+pixels. Stars a few arcseconds apart are fully blended. In TIC~65344135 the
+target ($V=12.98$) and its neighbour TIC~65344134 ($V=13.17$, at 5.9$''$) end
+up in the same pixel (Figure~\ref{fig:blend}). TESS measures a dip of 3.2~ppt
+in their combined light. If the target is the host, its own dip must be about
+5.9~ppt; if the neighbour is the host, about 7.0~ppt. Under 2--3$''$ seeing a
+ground-based telescope measures both stars separately and decides.
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=\textwidth]{og_blend.pdf}
+\caption{Simulated view of the field of TIC~65344135. Left: TESS, 21$''$
+pixel grid; target and neighbour (crosses) fall in one pixel. Right: from the
+ground with 2.4$''$ seeing, with apertures of 3.5$''$ radius on the target and
+on the neighbour.}
+\label{fig:blend}
+\end{figure}
+
+\section{What the pipeline does with a ground light curve}
+
+\begin{enumerate}
+\item \textbf{Fit.} The shape of the transit (duration, ingress and egress)
+is taken from the TESS fit. Only the depth and the mid-time are free,
+together with a baseline (linear in time, plus airmass when present). The
+mid-time is searched within the uncertainty of the TESS ephemeris (at least
+$\pm$60~min). The errors are inflated for correlated noise. Why the TESS
+shape is used is explained in the box below.
+\item \textbf{Flux fractions.} For every star near the target, the fraction
+$\phi_j$ of the light in the ground aperture is computed. This uses the
+aperture radius, the seeing and the magnitude of each star in the observed
+band.
+\item \textbf{Expected depth.} If star $j$ hosts the signal, its own
+eclipse must have the depth $\delta_j$ that reproduces the TESS dip, and the
+ground aperture must show $\phi_j\,\delta_j$.
+\item \textbf{Clearance.} Star $j$ is \emph{excluded} when this expected dip
+is absent ($\phi_j\delta_j$ well above the 3$\sigma$ upper limit), or when a
+dip is seen that is much deeper than $\phi_j\delta_j$. Excluded neighbours are removed
+before TRICERATOPS runs. The target is never removed, but if the ground data
+contradict it, the log warns loudly.
+\item \textbf{Colour.} The intrinsic depth is compared between bands and with
+TESS. A planet's depth is almost the same in every band; an EB or blend often
+is not.
+\item \textbf{Timing.} Good mid-times are added to the ephemeris and ETV
+analysis.
+\end{enumerate}
+
+\begin{tip}
+\textbf{Why fit a ground light curve with the TESS shape?}
+\begin{itemize}
+\item \emph{The question is whether the TESS event is there.} The duration
+and the ingress/egress times are set by the geometry of the orbit. They are
+the same in every band and in every aperture; only the depth changes, with
+the dilution and slightly with limb darkening. A dip of the right star must
+therefore have the TESS shape.
+\item \emph{TESS usually knows the shape much better.} The TESS template is
+the fold of \emph{all} transits TESS observed (7 for TIC~65344135, more than
+250 for WASP-18~b), each with baseline on both sides. A single ground light
+curve has a few hours of data with trends from
+airmass and seeing, often only one side of baseline, and an S/N of 5--15. A
+free fit of duration and impact parameter to such data is badly degenerate
+with the baseline. Fixing the shape leaves two well-determined numbers,
+the depth and the mid-time. This holds when TESS has enough transits with
+a good S/N; for a candidate with only one or two shallow TESS transits a
+good ground light curve can define the shape better than TESS, and the
+fit in \code{ground_lightcurves_<TIC>.pdf} shows whether the TESS template
+still fits.
+\item \emph{Depths must be comparable.} The clearance compares the ground
+depth with the depth expected from TESS. That only works if both are
+measured with the same template.
+\item \emph{Non-detections need a template.} ``No dip'' becomes a number,
+the 3$\sigma$ upper limit, only for a dip of a given shape and duration.
+\end{itemize}
+\textbf{Limitations.} Limb darkening is stronger in blue bands, so the bottom
+of the transit is slightly more rounded there. This changes the fitted depth
+by a few per cent, which the 25\% tolerance and the colour test absorb. A
+dip with a clearly different duration would fit the template badly
+($\chi^2$, residuals in \code{ground_lightcurves_<TIC>.pdf}). It would then
+not be the TESS signal, or the TESS shape would be wrong. Either way, look
+at the figure.
+\end{tip}
+
+\section{The output and how to read it: example TIC 65344135}
+\label{sec:groundout}
+
+A ground light curve leaves its traces in six places. They are explained
+here with a synthetic test for TIC~65344135 (AAVSO campaign 942): one
+transit observed three times, in Rc on the target, in $r'$ on the neighbour
+TIC~65344134 (5.9$''$) and in B on the target, with 2~ppt per 1-min point.
+The transit was injected on the target.
+
+\begin{center}
+\begin{tabular}{@{}p{0.42\textwidth}p{0.5\textwidth}@{}}
+\toprule
+Output & What it tells\\
+\midrule
+log, section \emph{Ground-based photometry} & fit of every light curve, flux fractions, verdict per star, colour test, TRICERATOPS+ use\\
+\code{ground_lightcurves_<TIC>.pdf} & the data with the fitted transit (Section~\ref{sec:glcplot})\\
+\code{ground_clearance_<TIC>.pdf}, \code{.csv} & which stars are consistent with, excluded by or not tested by each light curve (Section~\ref{sec:clearance})\\
+\code{ground_chromaticity_<TIC>.pdf} & intrinsic depth per band (Section~\ref{sec:multiband})\\
+\code{ground_times_<TIC>.txt} & mid-times for the ephemeris and timing analysis\\
+\code{summary_<TIC>.json} (\code{ground}) and the audit & the results in one place; tests \emph{Ground data} and \emph{Multi-band}\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{The log}
+For each light curve the log first gives the fit, then the apertures and
+the verdicts. For the test:
+\begin{lstlisting}
+obsA_R_target: band R, aperture on target, 481 points, cadence 1.0 min, baseline poly1+AIRMASS
+    epoch 23: predicted Tc = 2461348.24000 BJD_TDB +- 2.9 min
+    coverage of the transit 100 % (baseline before: yes, after: yes); rms 2043 ppm, chi2_red 1.04, beta 1.00
+    depth = 5844 +- 525 ppm (S/N 11.1); 3-sigma upper limit in the window 7419 ppm
+    mid-time Tc = 2461348.24347 +- 2.0 min BJD_TDB (O - C = +5.0 min)
+    DETECTED
+obsB_r_neighbour: band r, aperture on TIC 65344134 ...
+    depth = 317 +- 405 ppm (S/N 0.8); 3-sigma upper limit in the window 1937 ppm
+    no significant dip
+...
+obsA_R_target [R]: aperture r = 3.5", FWHM 2.4"; flux fractions: 65344135 0.994, 65344134 0.006
+combined verdict per star:  TIC 65344135 (target): consistent   TIC 65344134: excluded
+intrinsic depth if TIC 65344135 is the host [ppm]: R: 5877 +- 557, B: 4970 +- 720; TESS 5900
+    band-independent depth: chi2 = 1.6 for 2 dof, p = 0.455  -> achromatic
+\end{lstlisting}
+Read it in this order:
+\begin{itemize}
+\item \textbf{Coverage and baseline.} Was the whole transit window observed,
+with baseline on both sides? A light curve that misses the window is
+\emph{not usable} and tests nothing.
+\item \textbf{Noise.} rms per point, $\chi^2_\nu$ near 1 and $\beta$ (red-noise
+factor) near 1 mean that the errors are realistic; $\beta > 1.5$ means trends
+that the baseline model did not remove.
+\item \textbf{Depth and S/N.} ``DETECTED'' needs S/N $\geq$ 5 and a clear
+improvement of the fit. Without a detection the \emph{3$\sigma$ upper limit}
+is the useful number: it is what the clearance compares with. It is computed
+as follows: the template is fitted at every trial mid-time in the search
+window (only mid-times at which at least half of the transit is covered),
+each fit gives a depth $A$ and its error $\sigma_A$ (inflated for red noise),
+and the limit is the largest value of $A + 3\sigma_A$ over the window. A dip
+deeper than that is excluded at 3$\sigma$ wherever in the window it falls.
+\item \textbf{Mid-time.} O$-$C against the TESS ephemeris; a few minutes is
+normal, much more than the window means the dip is probably not the TESS
+event.
+\item \textbf{Flux fractions, verdicts, colour, TRICERATOPS+:} explained in
+the next sections.
+\end{itemize}
+
+\subsection{The fitted light curves}
+\label{sec:glcplot}
+\begin{figure}[ht]
+\centering
+\includegraphics[width=0.95\textwidth]{ground_lightcurves_example.pdf}
+\caption[Fitted ground light curves]{\code{ground_lightcurves_<TIC>.pdf} for the synthetic test of
+TIC~65344135: Rc on the target (dip detected), $r'$ on the neighbour (no
+dip), B on the target (dip detected). Shaded: the window in which the
+mid-time is searched; dashed: the predicted mid-time.}
+\label{fig:glc}
+\end{figure}
+
+One panel per light curve: the detrended data (points and 10-min bins) and
+the fitted transit with the TESS shape; the box repeats depth, S/N, the
+offset from the predicted mid-time, the coverage and $\beta$. Check that the
+dip lies in the shaded window, that the bins follow the red curve without
+systematic deviations (a dip of another duration would not fit the
+template) and that the baseline is flat on both sides. In the test, the two target light curves show the transit; the
+neighbour's aperture is flat within the noise.
+
+\begin{figure}[p]
+\centering
+\includegraphics[width=0.93\textwidth]{ground_clearance_example.pdf}
+\caption[Clearance diagram]{Clearance diagram (\code{ground_clearance_<TIC>.pdf}) for the three
+synthetic light curves of Figure~\ref{fig:glc}. One panel per ground light
+curve. Each point is a star that could host the TESS signal. Its height is
+the dip \emph{this} aperture would show if that star were the host. The
+orange band is the measured dip $\pm3\sigma$ (only when a dip is detected);
+the dotted line is the largest dip the data allow. Colours: green
+\emph{consistent}, red \emph{excluded}, blue \emph{allowed}, grey
+\emph{unconstrained}. The reasoning is explained in the text.}
+\label{fig:gclear}
+\end{figure}
+
+\subsection{The clearance diagram}
+\label{sec:clearance}
+
+\code{ground_clearance_<TIC>.pdf} (Figure~\ref{fig:gclear}), with the same
+numbers in \code{ground_clearance_<TIC>.csv}.
+
+The diagram answers one question per light curve and per star: \emph{if this
+star were the source of the TESS dip, what would this ground aperture have
+to show?} The steps below are general; the examples are the three light
+curves of the synthetic test (TESS dip of 3.2~ppt; target and neighbour at
+5.9$''$).
+
+\begin{enumerate}
+\item \textbf{The expected dip of each star.} TESS measures the dip $\delta_\mathrm{TESS}$
+in the light of all stars in its aperture. For each star $j$ that could host
+the signal, TRICERATOPS computes how deep that star's \emph{own} eclipse
+$\delta_j$ would have to be to produce it: the fainter the star's share of
+the TESS light, the deeper. In a ground aperture star $j$ contributes a
+fraction $\phi_j$ of the light (printed under its name; it depends on the
+aperture radius, the seeing, the band and the separation). If $j$ were the
+host, the aperture would therefore show a dip of $\phi_j\,\delta_j$. This is
+the height of the point.\\
+\emph{Example:} the target would need $\delta \approx 5.9$~ppt, the
+neighbour 6.9~ppt. In the target aperture (top panel) the target supplies
+99.4\% of the light, $0.994 \times 5.9 \approx 5866$~ppm; the neighbour
+0.6\%, $0.006 \times 6.9~\text{ppt} \approx 40$~ppm.
+\item \textbf{What was measured.} The title of each panel says whether a dip
+was detected. If it was, the orange line and band show its depth and
+3$\sigma$ range. The dotted line is the 3$\sigma$ upper limit of
+Section~4.3.1: the largest dip compatible with the data for any mid-time in
+the search window.
+\item \textbf{The verdict per star and per light curve:}
+\begin{description}
+\item[Consistent (green).] A dip is detected and the point lies in the
+orange band: the dip this star would cause is the dip that is seen.
+\emph{Example:} the target in the top and bottom panels.
+\item[Excluded, ``its dip would be seen, but is not''.] The point lies
+well above the dotted line: in this aperture the star would produce a dip
+larger than the data allow. This is the test that clears a neighbour with
+an aperture centred on it.
+\emph{Example (middle panel):} in its own aperture the neighbour would cause
+6943~ppm, at most 1937~ppm is allowed.
+\item[Excluded, ``too faint here to cause the dip seen''.] A dip \emph{is}
+detected, but it is deeper (beyond 3$\sigma$) than this star could cause
+even as the host, because it supplies too little light to the aperture.
+\emph{Example (top panel):} the neighbour could cause 40~ppm in the target
+aperture, 5844~ppm is seen.
+\item[Allowed (blue).] No conflict, but also no test: no dip is seen, and
+the dip this star would cause \emph{in this aperture} is far below what the
+data can detect. ``Too small'' refers to the star's share of the light in
+this aperture, not to its brightness. The light curve neither supports nor
+contradicts this star: it would look the same whether the star is the host
+or not.
+\emph{Example (middle panel):} the target, seen in the aperture on the
+neighbour. It supplies only 0.8\% of the light there, so as the host it
+would cause $0.008 \times 5.9~\text{ppt} \approx 48$~ppm. The light curve
+measures $317 \pm 405$~ppm at the best-fitting mid-time and $289 \pm
+511$~ppm at the predicted one (S/N 0.8): no dip is detected, and the 3$\sigma$
+upper limit over the $\pm60$-min window is 1937~ppm. A dip of 48~ppm is
+0.1$\sigma$ of this measurement, so the data cannot tell it from no dip at
+all: what is seen is exactly what is expected if the target is the host,
+but also if it is not. The target is tested by the light curves
+centred on it (top and bottom panels), where it is \emph{consistent}.
+\item[Unconstrained (grey).] The light curve does not cover the transit
+window, so it says nothing.
+\end{description}
+\item \textbf{Combining the light curves.} A star excluded in at least one
+light curve, and consistent in none, is removed before TRICERATOPS; its
+NTP/NEB scenarios disappear. The target is never removed: if the ground
+data exclude it, the log warns that the candidate is probably a false
+positive. A star excluded in one light curve and consistent in another is
+reported as a \emph{conflict} and kept; check the apertures, filters and
+comparison stars.\\
+\emph{Example:} the neighbour is excluded twice (top and middle panels), the
+target is consistent twice (R and B): the neighbour is removed.
+\end{enumerate}
+
+A tolerance of 25\% on the expected depth (\code{--ground-depth-tol})
+absorbs the uncertainties of the seeing model, the band magnitudes and limb
+darkening. A star is never excluded on a difference smaller than that.
+
+
+\input{multiband_section.tex}
+
+\subsection{Mid-times}
+Every light curve with a well-measured mid-time adds a line to
+\code{ground_times_<TIC>.txt} (BJD\_TDB, error in minutes, label). These
+times enter the timing analysis of the same run and can be passed to later
+runs with \code{--extra-times}. A ground transit years after the TESS data
+is the best way to refine the period. In the test:
+\begin{lstlisting}
+2461348.243472  2.00  obsA_R_target
+2461348.248333  3.00  obsC_B_target
+\end{lstlisting}
+
+\subsection{In the summary and the audit}
+\code{summary_<TIC>.json} collects everything under \code{ground}: per light
+curve the band, depth, S/N, coverage and mid-time; the verdict per star; the
+stars cleared; the colour test per host (depths per band, ratio of the
+reddest to the bluest band with its error); and which light curves
+TRICERATOPS+ used. The audit turns this into two tests:
+\emph{Ground data} (do ground and TESS agree, which stars were cleared, any
+conflict) and \emph{Multi-band} (Section~\ref{sec:multiband}). For the test
+the verdict is: target consistent in Rc and B, neighbour excluded and
+removed, depth achromatic; the neighbour's NTP/NEB scenarios disappear from
+the FPP.
+
+
+
+\section{Practical advice for observers}
+
+\begin{itemize}
+\item \textbf{Timing.} Observe the \emph{whole} transit with at least
+45--60~min of baseline before ingress and after egress. Add the ephemeris
+uncertainty (in the log, or ask) to the predicted times. The GUI tool
+\emph{Predicted transit times} gives the next events
+(Section~\ref{sec:tools}).
+\item \textbf{Band.} A red band (Rc or Sloan $r'$) gives the best S/N for
+most stars. A second band far from the first ($g'$ with $z'$, or B with I),
+preferably at the same time, allows the colour test
+(Section~\ref{sec:multiband}); only $g$, $r$, $i$, $z$, $J$, $H$, $K$ (and
+Rc, Ic) enter TRICERATOPS+.
+\item \textbf{Exposure.} Do not saturate. Cadences of 1--3~min are fine. The
+transit of TIC~65344135 lasts 5.3~h, so binning loses nothing.
+\item \textbf{Apertures.} Measure the target and \emph{each} neighbour that
+could host the signal in separate apertures; in AstroImageJ, as targets T1,
+T2, \ldots{} Choose a radius of about 1.5--2 times the seeing FWHM but
+smaller than the separation, if possible. Report the radius and the FWHM in
+arcseconds.
+\item \textbf{Comparison stars.} Use several, of similar brightness and
+colour; reject variables.
+\item \textbf{Deliver raw relative fluxes.} Deliver them with an airmass
+column, not a light curve you have already detrended: the pipeline fits the
+baseline together with the transit.
+\item \textbf{Times.} Use BJD\_TDB if possible. JD\_UTC is accepted and
+converted, but say which one it is.
+\item \textbf{Formats.} AstroImageJ measurement tables, AAVSO/EXOTIC
+exoplanet reports or a simple table of time, flux and error are all read.
+\item \textbf{Precision.} In the synthetic test, 2~ppt per 1-min point gave
+the depth to $\pm0.5$~ppt. That is enough to tell 5.9~ppt from zero at more
+than 10$\sigma$, and 5.9 from 7.0~ppt marginally. Several light curves
+combine.
+\end{itemize}
+
+\input{followup_chapter.tex}
+
+%% ======================================================================
+\part{Using the GUI}
+%% ======================================================================
+
+\chapter{Installation and start}
+
+\section{What you need}
+
+\begin{description}
+\item[The scripts.] \code{triceratops_validation.py}, \code{triceratops_gui.py},
+the folders \code{profiles/} and \code{tests/}, all in one folder, here
+\code{D:\\EXPLORE\\candidates_dymock} (in WSL:
+\code{/mnt/d/EXPLORE/candidates_dymock}).
+\item[A Python environment for the pipeline.] It needs triceratops 1.1,
+lightkurve, astroquery, wotan, transitleastsquares, numpy, scipy and
+matplotlib. Optionally, a second environment \code{triplus} holds
+TRICERATOPS+ (technical manual, Chapter~52):
+\begin{lstlisting}
+conda create -n triplus -c conda-forge python=3.11 "numpy<2.4" scipy pandas matplotlib astropy astroquery numba celerite emcee seaborn arviz corner pytest
+conda activate triplus
+pip install lightkurve "pytransit==2.2.0" mechanicalsoup pyrr wotan transitleastsquares "setuptools<81"
+git clone https://github.com/JGB276/TRICERATOPS-plus.git
+cd TRICERATOPS-plus && pip install .
+\end{lstlisting}
+\item[Tkinter for the GUI.] Any conda Python has it. A system Python on
+Ubuntu/WSL needs \code{sudo apt install python3-tk}. On Windows 11 the GUI
+window of WSL appears on the desktop automatically (WSLg).
+\end{description}
+
+\section{Starting}
+
+\begin{lstlisting}
+cd /mnt/d/EXPLORE/candidates_dymock
+python triceratops_gui.py
+\end{lstlisting}
+The GUI reads the options from the validation script in the same folder and
+restores your last session. Check the installation once with
+\emph{Tools $\rightarrow$ Run regression tests}; all tests should pass.
+
+%% ----------------------------------------------------------------------
+\chapter{A tour of the window}
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=\textwidth]{og_tab_target.png}
+\caption{The main window (GUI v1.2) with the TRICERATOPS+ profile of TIC~65344135 loaded. New in v1.2 on this tab: \emph{Mission}, \emph{KIC ID}, \emph{Host star}, \emph{Stellar parameters from}, \emph{Manual R M Teff} and \emph{Mask other planets}.}
+\label{fig:main}
+\end{figure}
+
+From top to bottom (Figure~\ref{fig:main}):
+\begin{description}
+\item[Menu bar.] \emph{File} (profiles, import or copy a command),
+\emph{Profiles} (ready-made settings per object), \emph{Tools} (interpreter
+check, transit times, tests, \emph{Audit output folder}), \emph{Help} (this
+manual and the technical one, command-line help).
+\item[Run environment.] The \emph{Python interpreter} that runs the
+pipeline. Choose your triceratops~1.1 environment, or \code{triplus} for
+TRICERATOPS+. \emph{Check} shows which triceratops it contains. The
+\emph{Working folder} is where the run starts; results go to
+\code{TIC<tic>/} in this folder unless an output folder is set.
+\item[Tabs.] Six tabs with options, then \emph{Run \& log} and
+\emph{Results} (with the button \emph{Audit run}). Hover over an option's name to see its command-line flag and
+explanation. Grey text on the right shows the default. Empty fields mean
+``use the default''.
+\item[Command.] The exact command that will run, updated as you type. Red
+text below it explains what is missing or inconsistent. \emph{Copy} puts it
+on the clipboard, for a terminal or for your notes.
+\end{description}
+
+\textbf{New fields in v1.2.} On the tab \emph{Target \& ephemeris}:
+\begin{description}
+\item[Mission, KIC ID.] \emph{kepler} with a KIC number analyses Kepler data
+(Chapter~\ref{ch:kepler}); the TIC field may then stay empty.
+\item[Host star for TRICERATOPS.] TRICERATOPS treats this TIC star as the host,
+for example a close companion, while the light curve stays that of the
+target. The light curve is then used on the aperture scale (SAP, no dilution
+correction).
+\item[Stellar parameters from, Manual R M Teff.] Radius, mass and temperature
+of the host from the TIC (default), from the Kepler catalogues (Berger et
+al.\ 2020, else the DR25 table), or typed in, e.g.\ from a paper.
+\item[Mask other planets.] P, T0 and T14 of other planets in the system; their
+transits are removed from the light curve (e.g.\ TOI-7930.01 when analysing
+.02).
+\end{description}
+On the tab \emph{TRICERATOPS}: \emph{Verdict from FPP/NFPP only} (switch off
+the pipeline's own EB evidence, Chapter~\ref{ch:pipeline}) and \emph{Imaging
+inner working angle}, used for the recommended next observations.
+
+\section{Profiles}
+
+A \emph{profile} holds all the settings for one object. The menu
+\emph{Profiles} (Figure~\ref{fig:prof}) lists the profiles in the folder
+\code{profiles/}. Choosing one replaces all options: options not in the
+profile return to their defaults, so the same profile always gives the same
+command. The supplied profiles:
+
+\begin{longtable}{@{}p{0.34\textwidth}p{0.59\textwidth}@{}}
+\toprule
+\textbf{Profile} & \textbf{Object and settings}\\
+\midrule\endhead
+\code{profile_TIC65344135} & AAVSO campaign 942, triceratops 1.1: P = 36.88~d, T0 = BTJD 4352.3681, 5900~ppm (on the target's scale), T14 = 5.33~h, scan $\pm$16~h, LD fit.\\
+\code{profile_TIC65344135_triplus} & The same for the \code{triplus} environment (TRICERATOPS+): 3200~ppm (aperture scale), dilution correction none, TRICERATOPS+ on.\\
+\code{profile_TIC229788204} & Grazing EB candidate, P = 93.83471~d; LD fit, sensitivity runs.\\
+\code{profile_TIC165501544} & P = 132.42~d, 3228~ppm; grid search.\\
+\code{profile_TIC229675482} & P = 145.841~d, 863~ppm; grid search.\\
+\code{profile_TIC229701403_b}, \code{_c} & Two long-period candidates, separate output folders.\\
+\code{profile_template_new_candidate} & Start for a new object.\\
+\bottomrule
+\end{longtable}
+
+Save your own with \emph{File $\rightarrow$ Save profile}, which also stores
+the interpreter and working folder, or \emph{Save target profile (options
+only)}, the version to pass on to colleagues. You are asked for a short
+description, shown in the menu.
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=0.9\textwidth]{og_profiles_menu.png}
+\caption{The \emph{Profiles} menu.}
+\label{fig:prof}
+\end{figure}
+
+%% ----------------------------------------------------------------------
+\chapter{Worked example: AAVSO campaign 942 (TIC 65344135)}
+\label{ch:example}
+
+\textbf{Situation.} TESS shows six transits of 3.2~ppt with P = 36.88~d.
+The neighbour at 5.9$''$ could be the source. Dennis Conti's campaign asks for
+ground photometry of the transits of 7~November and 14~December 2026, with
+target and neighbour measured separately, in a red and if possible a blue
+band.
+
+\section*{Step 1 --- Load the profile and check the environment}
+\begin{enumerate}
+\item \emph{Profiles $\rightarrow$ profile\_TIC65344135}. For TRICERATOPS+
+choose \code{profile_TIC65344135_triplus} instead.
+\item Choose the matching interpreter and press \emph{Check}. The text next
+to it reads, for example, ``triceratops 1.1.0, Python 3.13'' or
+``TRICERATOPS+ 1.0.17, Python 3.11''.
+\item Look at the tab \emph{Target \& ephemeris} (Figure~\ref{fig:main}).
+The ephemeris fields hold P, T0, depth and T14. T0 may be typed as the full
+BJD from the campaign page (2461352.3681); the GUI converts it to BTJD and
+says so under the command.
+\end{enumerate}
+
+\section*{Step 2 --- Plan the observation (optional)}
+\label{sec:tools}
+\emph{Tools $\rightarrow$ Predicted transit times} lists the next transits
+from the ephemeris fields (Figure~\ref{fig:transits}). The UTC times are
+approximate ($\pm$8~min, no barycentric correction); for 7~November the tool
+gives 20:48~UTC, the campaign page 20:43~UTC. Add the ephemeris uncertainty
+and the baseline before and after.
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=0.95\textwidth]{og_transits.png}
+\caption{Predicted transits of TIC~65344135.}
+\label{fig:transits}
+\end{figure}
+
+\section*{Step 3 --- Add the ground light curves}
+Put the observers' files in a subfolder, for example \code{campaign942/}.
+On the tab \emph{Ground photometry} (Figure~\ref{fig:gtab}) press \emph{Add
+files}, select one or more files and fill in the dialog for each
+(Figure~\ref{fig:gdlg}):
+
+\begin{longtable}{@{}p{0.24\textwidth}p{0.69\textwidth}@{}}
+\toprule
+\textbf{Field} & \textbf{What to enter}\\
+\midrule\endhead
+Band & R (= Rc), V, B, I, or Sloan g r i z; also J H K, CBB, clear. Empty: from the file header, else R.\\
+Aperture star (TIC) & Empty for the target; 65344134 for the neighbour's aperture.\\
+Aperture radius & Radius in arcsec, as used in the photometry.\\
+Seeing FWHM & In arcsec (median of the night).\\
+Observer & Name or AAVSO code.\\
+Time system & Empty or BJD\_TDB; JD\_UTC or HJD\_UTC if that is what the file has.\\
+Flux / error / time column & Only if the defaults are not right, e.g.\ \code{rel_flux_T2} for the neighbour in an AstroImageJ table where it is T2.\\
+Magnitudes & 1 if the flux column holds magnitudes.\\
+Detrend & Empty (= linear + airmass); \code{poly2} or extra columns, e.g.\ \code{poly1,AIRMASS,FWHM_Mean}.\\
+Centre RA/Dec, pixel scale & Rarely needed (aperture not on a catalogued star; AstroImageJ radii in pixels).\\
+TRICERATOPS+ band & Only to override the automatic choice.\\
+\bottomrule
+\end{longtable}
+
+The same AstroImageJ file can be added twice, once for the target (T1) and
+once for the neighbour (\code{fcol=rel_flux_T2}, aperture star 65344134).
+\emph{Save as list} writes the table to a list file that can be used on the
+command line (\code{--ground-list}); \emph{Import list} reads one.
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=\textwidth]{og_tab_ground.png}
+\caption{Tab \emph{Ground photometry} with three light curves.}
+\label{fig:gtab}
+\end{figure}
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=\textwidth]{og_ground_dialog.png}
+\caption{The dialog for one ground light curve (the neighbour's aperture).}
+\label{fig:gdlg}
+\end{figure}
+
+\section*{Step 4 --- Save, run and follow}
+\begin{enumerate}
+\item \emph{File $\rightarrow$ Save profile} keeps this set-up, for example as
+\code{profile_TIC65344135_campaign.json}.
+\item Press \emph{Run}. The tab \emph{Run \& log} shows the output as it
+comes (Figure~\ref{fig:run}): section headers in blue, warnings in red. The
+status line shows the elapsed time and the current step.
+\item Typical durations:
+\begin{itemize}
+\item the first download of all TESScut sectors: tens of minutes; later runs
+use the cache;
+\item the light-curve analysis: a few minutes;
+\item the TRICERATOPS runs: up to the time budget, 1~h by default.
+\end{itemize}
+\item \emph{Stop} ends a run. You can close the window only after
+confirming.
+\end{enumerate}
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=\textwidth]{og_run.png}
+\caption{Tab \emph{Run \& log} (here after running the regression tests).}
+\label{fig:run}
+\end{figure}
+
+\section*{Step 5 --- Read the results}
+When the run ends, the tab \emph{Results} opens (Figure~\ref{fig:res}). On
+the left is the summary as a tree, on the right the output files; a double
+click opens one. The key items:
+
+\begin{longtable}{@{}p{0.27\textwidth}p{0.66\textwidth}@{}}
+\toprule
+\textbf{Summary item} & \textbf{How to read it}\\
+\midrule\endhead
+\code{ld_fit} & Radius ratio, impact parameter $b$, \code{grazing}. A grazing fit ($b+k>1$) favours an EB.\\
+\code{secondary} & Best secondary eclipse and the 3$\sigma$ depth limit; a detection means EB.\\
+\code{etv} & O$-$C scatter, odd/even timing, limits on a third body.\\
+\code{ground} $\rightarrow$ \code{target_status} & \emph{consistent}: the target shows the expected dip. \emph{excluded}: it does not, so a likely false positive (check the data first!).\\
+\code{ground} $\rightarrow$ \code{cleared} & Neighbours excluded by the ground data and removed before TRICERATOPS.\\
+\code{ground} $\rightarrow$ \code{chromaticity} & $p$ of a band-independent depth; \code{chromatic = True} means EB or blend.\\
+FPP, NFPP, verdict & See Chapter~2: PASSED when FPP $<0.015$ and NFPP $<0.001$; ``not converged'' means provisional.\\
+\code{scenario_classes} & Probability per family: planet on the target, EB on the target/companion, background star, nearby star.\\
+\code{triceratops_criteria_met}, \code{eb_evidence}, \code{eb_hints} & Whether FPP and NFPP alone meet the criteria; the pipeline's own evidence that overrules them; notes such as a possible planetary occultation.\\
+\code{ld_depth_not_adopted} & Why the depth of the limb-darkened fit was not passed to TRICERATOPS.\\
+\code{recommendations} & The next observations (Chapter~\ref{ch:followup}); also in \code{recommendations_<tic>.txt}.\\
+\bottomrule
+\end{longtable}
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=\textwidth]{og_results.png}
+\caption{Tab \emph{Results} after the TESS-only run of TIC~65344135 and its
+audit: summary (left), output files (right) and the button \emph{Audit run}.}
+\label{fig:res}
+\end{figure}
+
+\section*{How to interpret the outcomes for TIC 65344135}
+\begin{longtable}{@{}p{0.42\textwidth}p{0.51\textwidth}@{}}
+\toprule
+\textbf{Ground result} & \textbf{Consequence}\\
+\midrule\endhead
+Target: dip of $\approx$5.9~ppt; neighbour: flat & Neighbour cleared, NFPP $\approx 0$. The FPP is then decided by the shape of the transit and the remaining scenarios on the target.\\
+Target flat; neighbour: dip of $\approx$7~ppt & Nearby eclipsing binary: false positive. The log says ``probable nearby eclipsing binary''.\\
+Dip on the target but much shallower or deeper than 5.9~ppt & Check the aperture radius, the comparison stars and the time window. If the result is confirmed, the dilution model or the host is wrong.\\
+Depth differs between red and blue & Chromatic: EB or blend, even if the dip is on the target.\\
+Light curves do not cover the transit & \emph{unconstrained}: no conclusion; a later transit is needed.\\
+\bottomrule
+\end{longtable}
+
+\textbf{Example from a real run.} For TIC~229788204 (TESS only) the
+pipeline found a V-shaped, grazing eclipse with no secondary, an FPP of 1.00,
+and probabilities of 0.55 for EB, 0.31 for EBx2P and 0.14 for PEBx2P. This is
+the typical signature of an eclipsing binary, here most likely a pair of
+nearly equal stars at twice the period (187.7~d).
+
+\section*{Step 6 --- Audit and next observations}
+Press \emph{Audit run}. The audit report opens as a PDF; its page \emph{Next
+observations} (Figure~\ref{fig:audit-next}) says which observation would
+lower the FPP most, and which combination would reach the validation limits.
+Chapter~\ref{ch:followup} explains how to read it.
+
+\textbf{Note.} The numbers in Figures~\ref{fig:glc} and~\ref{fig:gclear}
+come from a \emph{synthetic} test that mimics the campaign. The first real TESS-only result for this star is in
+Chapter~\ref{ch:prelim}.
+
+%% ----------------------------------------------------------------------
+\chapter{Preliminary result: TIC 65344135 with TESS only}
+\label{ch:prelim}
+
+This chapter reports the first complete run on the real TESS data of
+TIC~65344135, made on 4~November 2026 before the campaign transits. It is
+the baseline that the ground-based light curves will improve on. The figures
+are the pipeline's own output for this star.
+
+\section*{Set-up}
+\begin{itemize}
+\item \textbf{Command.} Profile \code{profile_TIC65344135} in the
+\code{triplus} environment (TRICERATOPS+ 1.0.17, NumPy 2.3, pytransit 2.2):
+\begin{lstlisting}
+triceratops_validation.py --tic 65344135 --ephemeris 36.88 4352.3681 5900 5.33 --ephem-scan-hours 16 --ld-fit --tri-plus on
+\end{lstlisting}
+\item \textbf{Data.} TESScut full-frame images of 7 sectors (3, 4, 30, 97,
+106, 107, 108; 2018--2026), with cadences of 30, 10 and 3.3~min.
+\item \textbf{Dilution.} In every sector the optimal aperture contains the
+target and the neighbour TIC~65344134 (5.9$''$). The target supplies a
+fraction $g = 0.556$--$0.562$ of the light in the aperture
+(Figure~\ref{fig:p-field}).
+\item \textbf{TRICERATOPS.} 20 runs, all valid, evidences pooled (re-run of
+4~November with the corrected script); no ground-based light curves yet.
+\end{itemize}
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=0.95\textwidth]{field_65344135_s97.pdf}
+\caption{Sector 97: TIC stars on the TESS pixel grid (left) and the image
+with the optimal aperture (red, right). Target and neighbour are 0.28 pixel
+apart.}
+\label{fig:p-field}
+\end{figure}
+
+\section*{Results}
+
+\begin{longtable}{@{}p{0.36\textwidth}p{0.57\textwidth}@{}}
+\toprule
+\textbf{Quantity} & \textbf{Result}\\
+\midrule\endhead
+Transits in TESS & 7 (epoch $-2$, sector 107, weak: S/N 2.6).\\
+Refined ephemeris & P = 36.87868 $\pm$ 0.00006~d, T0 = BJD 2461352.37156 $\pm$ 0.00225 (3.2~min).\\
+Depth in the TESS aperture & 3060~ppm (limb-darkened fit); 2825 $\pm$ 117~ppm (per-transit mean).\\
+Depth on the target alone & 5320 $\pm$ 210~ppm if the target is the host (aperture depth / $g$).\\
+Duration T14 & 5.49~h.\\
+Shape & U-shaped, not grazing; $b \approx 0$ (poorly constrained). $R_p/R_\star = 0.051$ on the aperture scale, 0.068 after the dilution correction ($/\sqrt{g}$). With the TIC radius of 0.99~$R_\odot$ that is about 7.3~$R_\oplus$ if the target is the host (TRICERATOPS, TP scenario: 7.5~$R_\oplus$), a sub-Saturn.\\
+Odd/even depths & 0.9$\sigma$ difference: no sign of an EB at twice the period.\\
+Secondary eclipse & None; 3$\sigma$ limit 450~ppm. An eclipsing companion would be cooler than about 3560~K.\\
+Timing (ETV) & O$-$C rms 9.4~min; no significant period change or third body.\\
+Difference imaging & Centroid consistent with the target (median 0.9$\sigma$), but 5.9$''$ cannot be resolved this way.\\
+FPP (pooled over 20 runs) & 0.389 $\pm$ 0.014 (run-to-run scatter 0.06).\\
+NFPP (pooled over 20 runs) & 0.376 $\pm$ 0.014.\\
+Verdict & NOT passed (requires FPP $<$ 0.015 and NFPP $<$ 0.001).\\
+\bottomrule
+\end{longtable}
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=0.62\textwidth]{ld_fit_65344135.pdf}
+\caption{Folded TESS light curve of the 7 transits (aperture scale; 10-min
+bins) with the limb-darkened fit: a flat-bottomed transit of 3060~ppm and
+5.5~h.}
+\label{fig:p-ld}
+\end{figure}
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=0.62\textwidth]{per_transit_depths_65344135.pdf}
+\caption{Depth (top) and mid-time offset (bottom) of the individual
+transits. Odd and even transits agree; the outlier at BTJD~4279 is the weak
+sector-107 event.}
+\label{fig:p-pt}
+\end{figure}
+
+\section*{What the probabilities say}
+
+The probability is shared between two explanations
+(Figure~\ref{fig:p-classes}):
+\begin{itemize}
+\item a planet on the target (TP, PTP, DTP): 0.61;
+\item a planet on the neighbour TIC~65344134 (NTP): 0.38.
+\end{itemize}
+The evidences of the TP and NTP scenarios are practically identical
+(pooled: 0.43 for TP, 0.38 for NTP). This is expected: the two stars
+are almost twins (Tmag 12.33 and 12.56, $T_{\rm eff}$ 5540 and 5390~K), so
+the same planet fits on either. Eclipsing-binary scenarios together have
+1.4\%, background stars 0.02\%.
+
+\textbf{The light curve itself therefore looks like a planet; what TESS
+cannot tell is around which star.} The FPP is high only because of the
+neighbour (FPP $\approx$ NFPP).
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=0.85\textwidth]{tic65344135_classes.pdf}
+\caption{Probability per class of explanation from the TESS data (blue),
+and the projection if the ground photometry clears the neighbour (green).}
+\label{fig:p-classes}
+\end{figure}
+
+\section*{What the campaign can decide}
+
+\begin{longtable}{@{}p{0.37\textwidth}p{0.56\textwidth}@{}}
+\toprule
+\textbf{Ground result} & \textbf{Expected effect}\\
+\midrule\endhead
+Neighbour flat, target dip $\approx$5.3~ppt & TIC 65344134 removed: NFPP $\rightarrow$ 0. FPP $\approx$ 0.014/0.625 $\approx$ 0.02: a \emph{likely planet}, but not yet below 0.015.\\
+Target flat, neighbour dip $\approx$6.9~ppt & Nearby eclipsing binary: the candidate is a false positive.\\
+Depth differs between red and blue & Chromatic: blend or EB, even on the target.\\
+\bottomrule
+\end{longtable}
+
+After clearing the neighbour, the remaining 2\% come mostly from
+scenarios with an unresolved companion of the target: STP (planet on the
+companion) and SEB.
+
+\section*{Recommended next observations (pipeline v4.3)}
+The run of 12~November 2026 with v4.3 (TRICERATOPS+, aperture depth, 20
+pooled runs) gives the same picture: FPP = 0.391, NFPP = 0.375, a planet on
+the target 0.61, a planet on the neighbour 0.37, a companion of the target
+(STP, SEB) 0.016. Its page \emph{Next observations}
+(Figure~\ref{fig:audit-next}) ranks the follow-up as follows:
+
+\begin{longtable}{@{}p{0.42\textwidth}p{0.14\textwidth}p{0.14\textwidth}p{0.2\textwidth}@{}}
+\toprule
+\textbf{Observation} & \textbf{FPP best case} & \textbf{FPP typical} & \textbf{NFPP}\\
+\midrule\endhead
+Now (TESS only) & 0.391 & 0.391 & 0.375\\
+Ground photometry, separate apertures & 0.026 & 0.026 & 0\\
+\quad + reconnaissance spectroscopy & 0.0004 & 0.008 & 0\\
+\quad + transits in g$'$ and z$'$ & 0 & 0.009 & 0\\
+\quad + high-resolution imaging & 0 & 0.012 & 0\\
+\bottomrule
+\end{longtable}
+
+\begin{itemize}
+\item \textbf{First the ground transit.} 96\% of the FPP comes from the
+neighbour. One transit with a separate aperture on each star decides where
+the dip is; with the dip on the target the NFPP drops to zero, and the FPP to
+about 0.026.
+\item \textbf{Then one of three.} What remains is a planet on an unresolved
+companion of the target (STP, best fit 0.71~$M_\odot$, 20\% of the light) or
+an eclipsing companion (SEB). Each of the three observations brings the FPP
+below 0.015 in its typical outcome. Spectroscopy reaches companions at every
+separation; imaging only those wider than 0.1$''$ (37~au), about half of them.
+For the colour test, two thirds of the possible companions change the depth
+by more than 20\% between g$'$ and z$'$; for the best-fit companion the two
+depths would differ by about 1900~ppm, so a depth error of about 600~ppm per
+filter is needed.
+\item \textbf{A practical choice for the campaign:} observe the transit with
+separate apertures \emph{and} in two filters (two telescopes, or alternating
+filters). One night then answers both questions.
+\end{itemize}
+
+\section*{Updated times for the observers}
+
+The refined ephemeris puts the transits about 5~min later than the campaign
+page. UTC times are derived from the campaign page's conversion of BJD to
+UTC, with T14 = 5.49~h. Add $\pm$3~min uncertainty plus at least 1~h of
+baseline before and after.
+
+\begin{longtable}{@{}lccccc@{}}
+\toprule
+\textbf{Date} & \textbf{Mid BJD\_TDB} & \textbf{Ingress} & \textbf{Mid} & \textbf{Egress} & \textbf{vs.\ campaign}\\
+\midrule\endhead
+7 Nov 2026 & 2461352.3716 & 18:03 UTC & 20:48 UTC & 23:33 UTC & +5.0 min\\
+14 Dec 2026 & 2461389.2502 & 15:11 UTC & 17:56 UTC & 20:40 UTC & +5.5 min\\
+\bottomrule
+\end{longtable}
+
+The ground aperture should show these depths:
+\begin{itemize}
+\item on the target alone, about 5.3~ppt if it is the host;
+\item on the neighbour alone, about 6.9~ppt if it is the host;
+\item in an aperture holding both stars, about 3.1~ppt.
+\end{itemize}
+
+\section*{Remarks}
+\begin{itemize}
+\item \textbf{Pooled FPP.} In the first run of 4~November the pooled FPP
+(0.335, bootstrap error 0.000) was not valid: with TRICERATOPS+ the evidences
+of the first run were reused for all 20 runs. The numbers in this chapter come
+from the re-run with the corrected script. The pooled evidences are now
+consistent with the mean over the runs (0.39), and no single run dominates
+(largest share 0.07).
+\item \textbf{Stellar density.} The density from the transit shape
+(2.2~g\,cm$^{-3}$) is somewhat higher than that from the TIC mass and radius
+(1.4~g\,cm$^{-3}$). With $b$ unconstrained and a possible eccentric orbit,
+this is no reason for concern.
+\end{itemize}
+
+\input{wasp18_chapter.tex}
+
+\input{tic229701403_chapter.tex}
+
+\input{l27994_chapter.tex}
+
+%% ----------------------------------------------------------------------
+\chapter{Other useful functions}
+
+\begin{description}
+\item[Import a command line.] \emph{File $\rightarrow$ Import command
+line}: paste a command, from a colleague or from the technical manual, and
+the fields are filled in.
+\item[Copy command.] To run the same analysis in a terminal or on another
+computer.
+\item[New.] Resets all options.
+\item[Last session.] Saved automatically in \code{~/.triceratops_gui.json}.
+\item[Regression tests.] \emph{Tools $\rightarrow$ Run regression tests}
+checks the installation in the selected interpreter (about 30 tests,
+$\sim$1~min).
+\item[Manuals.] \emph{Help $\rightarrow$ Observer's Guide (PDF)} opens this guide, \emph{Help $\rightarrow$ Technical manual (PDF)} the full technical manual.
+\item[Audit.] \emph{Results $\rightarrow$ Audit run}, or \emph{Tools
+$\rightarrow$ Audit output folder} for the current target, or \emph{Audit
+another output folder\ldots} for an older run (Chapter~\ref{ch:followup}).
+\item[Batch runs.] \code{triceratops_batch.py} (by Steve Price) runs a list of
+candidates from a JSON file: \code{--mode prefetch} downloads all TESScut
+cutouts first, \code{--mode test} then runs the pipeline and the audit for
+each, a few at a time. See \code{examples/batch_example.json}.
+\end{description}
+
+%% ----------------------------------------------------------------------
+\chapter{Kepler targets}
+\label{ch:kepler}
+
+Since v4.2 the same analysis runs on Kepler data (2009--2013). Choose
+\emph{Mission = kepler} and give the \emph{KIC ID} (Figure~\ref{fig:kepler}).
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=\textwidth]{og_tab_kepler.png}
+\caption[Kepler profile]{Profile \texttt{profile\_KIC3755522} (KOI-5005.01, Rabtsevich 2026):
+Kepler mode, KIC~3755522, stellar parameters from the Kepler catalogues.}
+\label{fig:kepler}
+\end{figure}
+
+\begin{itemize}
+\item \textbf{Data.} Long-cadence (29.4~min) PDCSAP or SAP light curves and
+target pixel files per quarter; the quarters take the place of the sectors.
+\item \textbf{Times} are in BKJD = BJD\_TDB $-$ 2454833 (TESS: BTJD =
+BJD\_TDB $-$ 2457000). A known T0 may also be given as the full BJD.
+\item \textbf{TIC number.} TRICERATOPS still needs the TIC for the field
+stars. The pipeline looks it up from the KIC. Old TIC entries of close pairs
+are often flagged SPLIT or DUPLICATE; the pipeline then takes the star at the
+KIC position, prints all candidates within 4$''$, and removes the flagged
+entries from the TRICERATOPS star table. Check the list in the log; with
+\code{--tic} you choose another star.
+\item \textbf{Stellar parameters.} \emph{Stellar parameters from = kepler}
+takes them from Berger et al.\ (2020, Gaia--Kepler), else from the DR25
+stellar table (Mathur et al.\ 2017).
+\item \textbf{Host.} For a close pair such as KIC~3755522~A and B
+(2.49$''$) give the TIC of B as \emph{Host star} and its parameters under
+\emph{Manual R M Teff} to ask whether a planet on B explains the signal.
+\item \textbf{VizieR.} When \code{vizier.cds.unistra.fr} cannot be reached
+the pipeline uses a mirror (CfA, IUCAA, NAO) and says so in the log.
+\end{itemize}
+
+Command-line equivalent of the profile:
+\begin{lstlisting}
+triceratops_validation.py --mission kepler --kic 3755522 --star-source kepler --ephemeris 251.9607 1123.2506 198 5.2 --ephem-search grid --ephem-scan-hours 3 --ephem-grid-dp 0.03 --lc-source pdcsap --ld-fit --vet-neighbours --sensitivity
+\end{lstlisting}
+
+%% ======================================================================
+\part{Reference}
+%% ======================================================================
+
+\chapter{All options}
+\label{ch:options}
+
+The tables list every option of \code{triceratops_validation.py} v4.3,
+grouped as on the tabs of the GUI. They were generated from the script
+itself. ``--'' means that the script chooses the value itself, as described
+in the explanation. In the GUI, leave such a field empty.
+
+\begin{tip}
+\textbf{The options most observers need:} TIC ID (or Mission and KIC),
+known ephemeris, scan half-width, limb-darkened fit, ground light curves, and
+for TRICERATOPS+ the dilution correction \emph{none} with the aperture depth.
+Everything else can stay at its default.
+\end{tip}
+
+\small
+\input{options_table.tex}
+\normalsize
+
+\section*{Keys of a ground light-curve specification}
+In the GUI these are the fields of the dialog. On the command line they are
+written as \code{--ground-lc "file,band=R,star=65344134,ap=3.5,fwhm=2.4"}.
+
+\begin{longtable}{@{}p{0.2\textwidth}p{0.73\textwidth}@{}}
+\toprule
+\textbf{Key} & \textbf{Meaning}\\
+\midrule\endhead
+\code{band} & B V R I (Johnson--Cousins; Rc = R), g r i z (Sloan; \code{r'}, \code{SR}, \code{rp} accepted), J H K, CBB, CV.\\
+\code{star} & TIC at the aperture centre (default: target).\\
+\code{ap}, \code{fwhm} & Aperture radius and seeing FWHM [arcsec].\\
+\code{obs} & Observer.\\
+\code{time} & \code{BJD_TDB} (default), \code{JD_UTC}, \code{HJD_UTC}.\\
+\code{tcol}, \code{fcol}, \code{ecol} & Column names of time, flux, error.\\
+\code{mag} & \code{1}: magnitudes.\\
+\code{detrend} & \code{auto}, \code{poly0/1/2}, \code{none}, plus covariate columns.\\
+\code{ra}, \code{dec} & Aperture centre [deg] instead of a star.\\
+\code{pixscale} & [arcsec/pixel], to convert AstroImageJ radii.\\
+\code{plus} & Band for TRICERATOPS+ (g r i z J H K).\\
+\code{label} & Name in the log and figures.\\
+\bottomrule
+\end{longtable}
+
+%% ----------------------------------------------------------------------
+\chapter{Output files}
+
+All files are written to the output folder (default \code{TIC<tic>/}, in
+Kepler mode \code{KIC<kic>/}).
+
+\begin{longtable}{@{}p{0.4\textwidth}p{0.53\textwidth}@{}}
+\toprule
+\textbf{File} & \textbf{Content}\\
+\midrule\endhead
+\code{triceratops_output_TIC<tic>.txt} & The complete log, ending with the SUMMARY block.\\
+\code{summary_<tic>.json} & Key results (shown on the tab \emph{Results}).\\
+\code{tesscut_<tic>_sNN.pdf}, \code{field_<tic>_sNN.pdf} & Cutout, aperture and field per sector.\\
+\code{lc_panels_*_<tic>.pdf}, \code{lc_transits_sectors_<tic>.pdf} & Light curves per sector, transits marked.\\
+\code{lc_stitched_<tic>.txt}, \code{lc_*_<tic>_sNN.txt} & Light-curve data.\\
+\code{tls_diagnostics_<tic>*.pdf} & TLS periodogram and fold (blind search).\\
+\code{ephem_grid_<tic>.pdf} & $(P, T_0)$ grid search.\\
+\code{per_transit_depths_<tic>.pdf/.txt} & Depth and mid-time of every transit; odd/even.\\
+\code{secondary_search_<tic>.pdf/.txt} & Secondary-eclipse search.\\
+\code{phased_transit_<tic>.pdf}, \code{folded_lightcurve_<tic>.txt} & Folded light curve.\\
+\code{ld_fit_<tic>.pdf}, \code{ld_fit_<tic>_bins.txt} & Limb-darkened fit.\\
+\code{etv_<tic>.pdf/.txt} & Eclipse timing and depth variations.\\
+\code{difference_image_<tic>_sNN.pdf}, \code{difference_imaging_<tic>.csv} & Difference imaging per sector; offsets.\\
+\code{neighbour_vetting_<tic>.csv} & Neighbours' own light curves (\code{--vet-neighbours}).\\
+\code{ground_lightcurves_<tic>.pdf} & Fits of the ground light curves.\\
+\code{ground_clearance_<tic>.pdf/.csv} & Clearance per light curve and star.\\
+\code{ground_chromaticity_<tic>.pdf} & Depth per band.\\
+\code{ground_times_<tic>.txt} & Ground mid-times (BJD\_TDB, error in min).\\
+\code{ground_plus_<tic>_<band>_<n>.txt} & Input files for TRICERATOPS+.\\
+\code{plot_fits_<tic>.pdf} & Best fit of every TRICERATOPS scenario.\\
+\code{red_noise_scramble_<tic>.txt} & Red-noise test (if requested).\\
+\code{field_TIC<tic>.csv}, \code{trilegal_TIC<tic>.*} & Cached catalogue and field-star tables.\\
+\code{<tic>_TRILEGAL.csv}, \code{<id>_gaia_background.csv} & Field-star tables written by TRICERATOPS itself (since v4.3 in the output folder).\\
+\code{recommendations_<tic>.txt} & Next observations (Chapter~\ref{ch:followup}).\\
+\code{audit_<tic>.pdf/.txt/.json} & Audit report (\emph{Audit run}).\\
+\bottomrule
+\end{longtable}
+
+%% ----------------------------------------------------------------------
+\chapter{Troubleshooting}
+
+\begin{longtable}{@{}p{0.36\textwidth}p{0.57\textwidth}@{}}
+\toprule
+\textbf{Problem} & \textbf{Solution}\\
+\midrule\endhead
+GUI does not start: \code{No module named tkinter} & Use a conda Python, or \code{sudo apt install python3-tk}.\\
+GUI: ``has no build\_parser()'' & The validation script is older than 4.1.1; use the current version.\\
+Red text under the command & An option is missing or two options exclude each other; the text says which.\\
+TRILEGAL download fails (SSL, 403) & Fill in the TRILEGAL form in a browser, download the table, give it as \emph{TRILEGAL / field-star file}; the pipeline otherwise falls back to Gaia DR3.\\
+\code{No module named pkg_resources} (TRICERATOPS+) & \code{pip install "setuptools<81"} in that environment.\\
+``QuadraticModel object has no attribute evaluate\_pv'', or the run stops with a message about pytransit & triceratops needs pytransit 2.2 (newer versions removed this function): \code{pip install "pytransit==2.2.0"}. \emph{Check} in the GUI shows the pytransit version.\\
+TRICERATOPS+: ``only 0-dimensional arrays can be converted to Python scalars'', or the run stops with a message about NumPy 2.4 & TRICERATOPS+ needs NumPy $<$ 2.4: \code{conda install -c conda-forge "numpy<2.4"} in the \code{triplus} environment. \emph{Check} in the GUI warns when the version is too new.\\
+TESScut slow or failing & Retries are automatic; set a \emph{TESScut cache folder} that is reused by later runs.\\
+Warning: depth passed to TRICERATOPS differs from the light curve & Give the depth on the scale of the light curve: on-target with the default dilution correction, the aperture depth with ``none'' or TRICERATOPS+.\\
+``Monte Carlo not converged'' & The verdict is provisional; raise \emph{Max.\ runs} or \emph{Time budget}, or \emph{Samples per run}.\\
+Ground light curve ``NOT USABLE'' & The file does not cover the transit window with baseline: check the time system and the date.\\
+Ground: column not found & Give \emph{Flux column}/\emph{Error column}/\emph{Time column} in the dialog.\\
+Files do not open from \emph{Results} under WSL & Open the output folder in Windows Explorer: \code{D:\\EXPLORE\\candidates_dymock\\TIC<tic>}.\\
+``VizieR not reachable'' & The pipeline uses a mirror; if none answers, Kepler-band limb darkening and the Kepler catalogue parameters are skipped (give \emph{Manual R M Teff}).\\
+Kepler: wrong star chosen for the KIC & Check the list of TIC candidates at the top of the log and give \code{--tic}.\\
+Verdict ``NOT passed: FPP and NFPP meet the criteria, but \ldots'' & The pipeline's own tests point to an EB or to twice the period; read the reason. \code{--no-eb-veto} restores the old verdict.\\
+\bottomrule
+\end{longtable}
+
+%% ----------------------------------------------------------------------
+\chapter{Glossary}
+
+\begin{description}
+\item[BJD\_TDB / BTJD / BKJD.] Barycentric Julian Date in the TDB time scale.
+BTJD = BJD\_TDB $-$ 2457000 is used by TESS, BKJD = BJD\_TDB $-$ 2454833 by
+Kepler.
+\item[KIC.] Kepler Input Catalog.
+\item[Occultation.] The planet passes behind its star; for hot planets a
+shallow secondary eclipse.
+\item[SB2.] Double-lined spectroscopic binary: the spectrum shows the lines of
+both stars.
+\item[Speckle / AO, inner working angle.] High-resolution imaging that removes
+the blur of the atmosphere; the inner working angle is the smallest
+separation at which a companion can be detected.
+\item[T0, P, T14.] Mid-time of a reference transit, period, total transit
+duration (first to fourth contact).
+\item[Depth.] Fractional flux loss at mid-transit, in ppm (parts per million;
+1~ppt = 1000~ppm $\approx$ 1.09~mmag).
+\item[Dilution.] Reduction of the observed depth by light of other stars in
+the aperture. ``On-target'' depth = the depth the target alone would show.
+\item[Grazing.] The occulting body covers only the edge of the star:
+V-shaped dip, $b + k > 1$.
+\item[FPP, NFPP.] False-positive probability; the part due to resolved
+nearby stars.
+\item[TESScut, FFI.] Cutouts of the TESS full-frame images.
+\item[TRILEGAL.] Model of the stellar population of the Galaxy, used for the
+number of background stars.
+\item[Contrast curve.] Detection limit (in magnitudes) of companions as a
+function of separation, from high-resolution imaging.
+\item[ETV / O$-$C.] Eclipse timing variations; observed minus calculated
+mid-times.
+\end{description}
+
+\section*{References}
+\begin{itemize}
+\item S.~Giacalone, C.~D.~Dressing et al., AJ 161, 24 (2021): TRICERATOPS.
+\item J.~G\'omez Barrientos et al., AJ 170, 148 (2025): TRICERATOPS+;
+\url{https://github.com/JGB276/TRICERATOPS-plus}.
+\item M.~Hippke \& R.~Heller, A\&A 623, A39 (2019): Transit Least Squares.
+\item M.~Hippke et al., AJ 158, 143 (2019): wotan.
+\item K.~A.~Collins et al., AJ 153, 77 (2017): AstroImageJ.
+\item M.~Riello et al., A\&A 649, A3 (2021): Gaia EDR3 photometry.
+\item AAVSO campaign 942: \url{https://apps.aavso.org/v2/campaigns/942}.
+\item D.~Raghavan et al., ApJS 190, 1 (2010): multiplicity of Sun-like stars.
+\item T.~A.~Berger et al., AJ 159, 280 (2020): Gaia--Kepler stellar properties.
+\item S.~Mathur et al., ApJS 229, 30 (2017): Kepler DR25 stellar properties.
+\item S.~Price, KESTREL and independent tests of this pipeline (November 2026):
+\url{https://github.com/moosesteve21/KESTREL}.
+\end{itemize}
+
+\end{document}

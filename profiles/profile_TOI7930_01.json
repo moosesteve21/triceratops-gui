@@ -1,0 +1,15 @@
+{
+  "gui_version": "1.2",
+  "description": "TOI-7930.01 (TIC 4206066, K/M dwarf 35.6 pc, Tmag 9.68, variable host): P = 11.1327 d, 910 ppm, 1.52 h, QLP PC; TOI-7930.02 masked",
+  "options": {
+    "tic": "4206066",
+    "outdir": "TIC4206066_01",
+    "ephemeris": ["11.132727", "4034.264547", "910", "1.52"],
+    "mask_ephemeris": "3.1827878 4040.113969 2.0",
+    "ld_fit": true,
+    "vet_neighbours": true,
+    "sensitivity": true,
+    "red_noise_scrambles": "2000"
+  },
+  "ground": []
+}

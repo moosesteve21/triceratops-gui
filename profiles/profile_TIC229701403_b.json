@@ -1,6 +1,6 @@
 {
-  "gui_version": "1.0",
-  "description": "TIC 229701403 planet 1 - P = 490.26 d, 7341 ppm (docx); few TESS transits",
+  "gui_version": "1.2",
+  "description": "TIC 229701403 planet 1 - P = 490.26 d, 7341 ppm (docx); Roger Dymock candidate b (Saturn size, G star 1.16 Rsun); few TESS transits; candidate c masked",
   "options": {
     "tic": "229701403",
     "outdir": "TIC229701403_b",
@@ -10,7 +10,11 @@
       "7341",
       "10.49976"
     ],
-    "ld_fit": true
+    "ld_fit": true,
+    "mask_ephemeris": "829.123932 1857.427872 12.0",
+    "vet_neighbours": true,
+    "sensitivity": true,
+    "red_noise_scrambles": "2000"
   },
   "ground": []
 }

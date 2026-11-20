@@ -1,0 +1,27 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
+*.zip
+*.bak
+*_backup.py
+.pytest_cache/
+
+# run outputs and caches (the example TIC65344135/ is added with git add -f)
+TIC*/
+KIC*/
+WASP18b*/
+tesscut_cache/
+*_TRILEGAL.csv
+*_gaia_background.csv
+gui_log.txt
+profiles/old/
+# private notes and third-party papers
+*.docx

@@ -45,6 +45,10 @@ import numpy as np
 
 __version__ = "0.1"
 
+BAND_LAMBDA_UM = {"B": 0.44, "V": 0.55, "g": 0.48, "r": 0.62, "R": 0.64, "i": 0.76,
+                  "I": 0.79, "z": 0.91, "J": 1.25, "H": 1.65, "K": 2.2, "CBB": 0.70,
+                  "CV": 0.60, "TESS": 0.80}
+
 THRESHOLDS = {
     "ephem_shift_warn_T14": 0.25,     # adopted vs input ephemeris, in T14
     "min_transits_fail": 3,
@@ -55,18 +59,25 @@ THRESHOLDS = {
     "odd_even_warn": 2.0,
     "odd_even_fail": 3.0,
     "density_ratio_warn": 1.5,        # transit vs catalogue stellar density
+    "b_fit_limit": 0.01,              # a fitted b below this sits at the b = 0 limit
     "g_range_warn": 0.05,
     "g_model_diff_warn": 0.02,
     "di_sector_warn_sigma": 3.0,
     "di_median_fail_sigma": 3.0,
     "di_min_snr": 3.0,
+    "di_star_min_p": 0.01,            # chi2 p-value for a star to fit the centroids
+    "di_star_dchi2": 9.0,             # ... and how much better than the target
     "nfpp_warn": 0.01,
     "dominance_warn": 0.2,
     "valid_frac_warn": 0.8,
     "ground_depth_tol": 0.25,
-    "bls_period_tol": 0.002,          # fractional
+    "bls_drift_tol": 0.5,             # max BLS-vs-pipeline mid-time drift [T14]
     "bls_depth_tol": 0.30,            # fractional
     "sector_depth_chi2_warn": 3.0,
+    "sector_depth_sys_frac": 0.015,   # sector-to-sector depth reproducibility of TESS
+    "occ_planet_tmax": 4000.0,        # a secondary this cool and ...
+    "occ_planet_depth_ratio": 0.1,    # ... this shallow can be a planet's occultation
+    "sensitivity_max_scale": 2.0,     # a pass lost only beyond this sigma scale is noted
     "input_depth_tol": 0.30,          # reference depth vs measured depth
 }
 
@@ -106,6 +117,7 @@ class Audit:
     tests: list = field(default_factory=list)
     recomputations: dict = field(default_factory=dict)
     thresholds: dict = field(default_factory=dict)
+    next_observations: list = field(default_factory=list)
 
     def claim(self, *a, **k):
         self.claims.append(Claim(*a, **k))
@@ -137,6 +149,8 @@ class Run:
         self.log_lines = self.log.splitlines() if self.log else []
         self.per_transit = self._table(f"per_transit_depths_{t}.txt")
         self.di = self._csv(f"difference_imaging_{t}.csv")
+        self.di_stars = self._csv(f"difference_imaging_stars_{t}.csv")
+        self.field = self._csv(f"field_TIC{t}.csv")
         self.ground = self._csv(f"ground_clearance_{t}.csv")
 
     def _guess_tic(self):
@@ -245,6 +259,11 @@ def evaluate(run: Run, A: Audit):
     if run.S("triceratops_plus") is not None:
         A.claim("TRICERATOPS+", bool(run.S("triceratops_plus")), kind="reference",
                 source=f"{sj}:triceratops_plus")
+    A.claim("bound-companion prior",
+            (f"MOLUSC ({os.path.basename(run.S('molusc_file'))}): companions "
+             f"limited by Gaia / imaging") if run.S("molusc_file")
+            else "TRICERATOPS default (no Gaia / imaging limits)",
+            kind="reference", source=f"{sj}:molusc_file")
     m, ln = run.grep(r"KNOWN ephemeris.*P = ([\d.]+) d, T0 = ([\d.]+) BTJD, "
                      r"T14 = ([\d.]+) h, depth = ([\d.]+) ppm")
     if m:
@@ -334,6 +353,69 @@ def _neighbour_hosts(run: Run):
         elif out and not parts:
             break
     return out
+
+
+def _centroid_stars(run: Run, sectors, max_sigma):
+    """Catalogued stars (not the target) within max_sigma of the
+    difference-image centroid in every given sector, brightest first."""
+    if not run.di_stars:
+        return []
+    want = {int(s) for s in sectors}
+    per = {}
+    for r in run.di_stars:
+        try:
+            s = int(float(r["sector"]))
+            if s in want and str(r.get("is_target")) != "True":
+                per.setdefault(r["ID"], {})[s] = (float(r["n_sigma"]),
+                                                  float(r["sep_target_arcsec"]))
+        except (KeyError, ValueError):
+            continue
+    tmag = {r["ID"]: r.get("Tmag", "") for r in (run.field or [])}
+    out = []
+    for sid, d in per.items():
+        if set(d) == want and all(ns < max_sigma for ns, _ in d.values()):
+            out.append(dict(ID=sid, sep=next(iter(d.values()))[1],
+                            Tmag=_f(float(tmag[sid]), "{:.2f}") if tmag.get(sid) else "?"))
+    return sorted(out, key=lambda h: float(h["Tmag"]) if h["Tmag"] != "?" else 99.0)
+
+
+def _centroid_combined(run: Run, vals, T: dict):
+    """Combine the sectors' centroid offsets.
+
+    Returns (z, stars): z is the significance (Gaussian sigma) at which the
+    target is excluded as the source, from chi2 = sum of the per-sector
+    offsets^2 over k sectors; stars are catalogued stars whose chi2 over the
+    same sectors is acceptable (p > di_star_min_p) and below the target's by
+    at least di_star_dchi2, brightest first.  Low-S/N sectors that each sit
+    under 3 sigma but all point to the same star are caught this way, while
+    scatter that no star fits better than the target is not.
+    """
+    from scipy import stats
+    k = len(vals)
+    chi_t = float(sum(v * v for _, v in vals))
+    p_t = float(stats.chi2.sf(chi_t, k))
+    z = float(stats.norm.isf(0.5 * p_t)) if p_t > 0 else float("inf")
+    want = {int(s) for s, _ in vals}
+    per = {}
+    for r in run.di_stars or []:
+        try:
+            s = int(float(r["sector"]))
+            if s in want and str(r.get("is_target")) != "True":
+                per.setdefault(r["ID"], {})[s] = (float(r["n_sigma"]),
+                                                  float(r["sep_target_arcsec"]))
+        except (KeyError, ValueError):
+            continue
+    tmag = {r["ID"]: r.get("Tmag", "") for r in (run.field or [])}
+    out = []
+    for sid, d in per.items():
+        if set(d) != want:
+            continue
+        chi_s = float(sum(ns * ns for ns, _ in d.values()))
+        if (np.isfinite(chi_s) and stats.chi2.sf(chi_s, k) > T["di_star_min_p"]
+                and chi_t - chi_s >= T["di_star_dchi2"]):
+            out.append(dict(ID=sid, sep=next(iter(d.values()))[1], chi2=chi_s,
+                            Tmag=_f(float(tmag[sid]), "{:.2f}") if tmag.get(sid) else "?"))
+    return z, sorted(out, key=lambda h: float(h["Tmag"]) if h["Tmag"] != "?" else 99.0)
 
 
 # --------------------------------------------------------------------------
@@ -427,8 +509,16 @@ def skeptic(run: Run, A: Audit, T: dict):
         A.test("Depth consistency", "Are the transits equally deep?", "NA", "not reported", src)
     else:
         st = "FAIL" if c > T["depth_chi2_fail"] else "WARN" if c > T["depth_chi2_warn"] else "PASS"
-        A.test("Depth consistency", "Are the transits equally deep?", st,
-               f"chi2/dof = {c:.2f}", src)
+        txt, adv = f"chi2/dof = {c:.2f}", ""
+        cx, edge = run.S("depth_chi2_red_excl_edge"), run.S("edge_transit_epochs")
+        if st != "PASS" and cx is not None and edge:
+            txt += f"; {cx:.2f} without the transit(s) next to a data gap (epochs {edge})"
+            if st == "FAIL" and cx <= T["depth_chi2_fail"]:
+                # not downgraded: a transit next to a gap can be as real as
+                # any other (e.g. an absent odd transit when the period is 2P)
+                adv = ("the failure rests on transits next to a data gap; inspect "
+                       "them before discarding them")
+        A.test("Depth consistency", "Are the transits equally deep?", st, txt, src, adv)
 
     # 5. odd/even
     oe = run.S("odd_even_sigma")
@@ -441,15 +531,50 @@ def skeptic(run: Run, A: Audit, T: dict):
         A.test("Odd/even", "Could the true period be 2P?", "NA", "not reported", src)
     else:
         st = "FAIL" if oe > T["odd_even_fail"] else "WARN" if oe > T["odd_even_warn"] else "PASS"
-        A.test("Odd/even", "Could the true period be 2P?", st, f"{oe:.2f} sigma", src)
+        txt, adv = f"{oe:.2f} sigma", ""
+        ox, edge = run.S("odd_even_sigma_excl_edge"), run.S("edge_transit_epochs")
+        if st != "PASS" and ox is not None and edge:
+            txt += f"; {ox:.2f} sigma without the transit(s) next to a data gap (epochs {edge})"
+            if st == "FAIL" and ox <= T["odd_even_fail"]:
+                adv = ("the failure rests on transits next to a data gap; inspect "
+                       "them before discarding them")
+        mp = run.S("missing_parity")
+        if st != "PASS" and mp in ("odd", "even"):
+            other = "even" if mp == "odd" else "odd"
+            d, e = run.S(f"depth_{mp}_ppm"), run.S(f"depth_{mp}_err_ppm")
+            do, eo = run.S(f"depth_{other}_ppm"), run.S(f"depth_{other}_err_ppm")
+            if None not in (d, e, do, eo):
+                txt += (f"; no transit at the {mp} epochs ({mp} {d:.0f} +/- {e:.0f} ppm, "
+                        f"{other} {do:.0f} +/- {eo:.0f} ppm)")
+            P = run.S("P_d")
+            adv = (f"rerun at 2P = {2 * P:.6f} d" if P else "rerun at twice the period") \
+                + (f"; {adv}" if adv else "")
+        A.test("Odd/even", "Could the true period be 2P?", st, txt, src, adv)
 
     # 6. secondary
     s = run.S("secondary")
     if s:
         if s.get("detected"):
-            A.test("Secondary", "Is there light from a companion?", "FAIL",
-                   f"secondary at phase {s.get('phase')}, depth {s.get('depth_ppm')} ppm",
-                   f"{sj}:secondary")
+            ph, dp, tk = s.get("phase"), s.get("depth_ppm"), s.get("companion_T_K")
+            prim = run.S("depth_on_target_ppm") or run.S("depth_ppm_adopted")
+            ratio = (dp / prim) if (dp and prim) else None
+            hint = any("occultation" in str(h) for h in (run.S("eb_hints") or []))
+            planet_like = hint or (tk is not None and ratio is not None
+                                   and tk < T["occ_planet_tmax"]
+                                   and ratio < T["occ_planet_depth_ratio"])
+            txt = (f"secondary at phase {_f(ph, '{:.4f}')}, depth {_f(dp, '{:.0f}')} ppm"
+                   + (f" ({ratio * 100:.1f} % of the primary)" if ratio is not None else "")
+                   + (f", brightness temperature ~{tk:.0f} K" if tk is not None else ""))
+            if planet_like:
+                A.test("Secondary", "Is there light from a companion?", "WARN",
+                       txt + ": shallow and cool enough to be the occultation of a hot planet "
+                       "(the pipeline does not count it against the planet)",
+                       f"{sj}:secondary,eb_hints",
+                       "an RV mass decides between a hot planet and a low-mass star; "
+                       "a phase near 0.5 means a (nearly) circular orbit")
+            else:
+                A.test("Secondary", "Is there light from a companion?", "FAIL", txt,
+                       f"{sj}:secondary")
         else:
             A.test("Secondary", "Is there light from a companion?", "PASS",
                    f"none; 3-sigma limit {_f(s.get('lim3_ppm_median'), '{:.0f}')} ppm, "
@@ -474,14 +599,35 @@ def skeptic(run: Run, A: Audit, T: dict):
     m, ln = run.grep(r"rho_star \(circular orbit\) = ([\d.]+)")
     m2, _ = run.grep(r"rho_star from TIC mass/radius\s+= ([\d.]+)")
     mb, lnb = run.grep(r"^\s+b\s+=\s+([\d.]+) \+/- ([\d.]+)")
-    issues = []
+    issues, notes = [], []
     if L.get("grazing") or mg:
         issues.append(f"grazing (b + k = {mg.group(1)})" if mg else "grazing")
+    b_free = bool(mb and float(mb.group(2)) > 1)
+    # a fit stuck at the b = 0 limit reports a meaningless, tiny error: its
+    # b is not constrained either, so the b range is searched as well
+    b_limit = bool(mb and float(mb.group(1)) < T["b_fit_limit"])
     if m and m2:
-        r = float(m.group(1)) / float(m2.group(1))
+        rho0, rho_c = float(m.group(1)), float(m2.group(1))
+        r = rho0 / rho_c
         if r > T["density_ratio_warn"] or r < 1 / T["density_ratio_warn"]:
-            issues.append(f"stellar density {m.group(1)} vs {m2.group(1)} g/cm3 (ratio {r:.2f})")
-    if mb and float(mb.group(2)) > 1:
+            # With b unconstrained, T14 fixes a/R* only up to
+            # sqrt((1+k)^2 - b^2): rho(b) = rho0 [((1+k)^2-b^2)/((1+k)^2-b0^2)]^1.5.
+            # Look for a b in [0, 1+k) that gives the catalogue density.
+            k = L.get("rp")
+            b0 = L.get("b", float(mb.group(1)) if mb else None)
+            b_match = None
+            if (b_free or b_limit) and k is not None and b0 is not None:
+                s2 = (1 + k) ** 2 - b0 ** 2
+                b2 = (1 + k) ** 2 - s2 * (rho_c / rho0) ** (2.0 / 3.0)
+                if 0.0 <= b2 < (1 + k) ** 2:
+                    b_match = float(np.sqrt(b2))
+            if b_match is not None:
+                notes.append(f"stellar density {rho0:g} at b = {b0:.2f} vs {rho_c:g} g/cm3, "
+                             f"but b is unconstrained and b = {b_match:.2f} gives the "
+                             f"catalogue density")
+            else:
+                issues.append(f"stellar density {m.group(1)} vs {m2.group(1)} g/cm3 (ratio {r:.2f})")
+    if b_free and not notes:
         issues.append(f"b unconstrained ({mb.group(1)} +/- {float(mb.group(2)):.3g})")
     if not (L or m):
         A.test("Shape", "Is the shape physical for this star?", "NA",
@@ -491,7 +637,8 @@ def skeptic(run: Run, A: Audit, T: dict):
                run.src(lng or ln), "an eccentric orbit, a wrong host or an EB can cause this")
     else:
         A.test("Shape", "Is the shape physical for this star?", "PASS",
-               "not grazing; stellar density consistent", run.src(ln))
+               "not grazing; " + ("; ".join(notes) if notes else "stellar density consistent"),
+               run.src(ln))
 
     # 8. dilution
     gr = run.S("g_target_range")
@@ -514,6 +661,7 @@ def skeptic(run: Run, A: Audit, T: dict):
                run.src(lnd) if md else f"{sj}:g_target_range")
 
     # 9. centroids
+    di_hosts = []
     if not run.di:
         A.test("Centroids", "Is the dip on the target?", "NA", "no difference imaging",
                f"difference_imaging_{run.tic}.csv")
@@ -533,9 +681,30 @@ def skeptic(run: Run, A: Audit, T: dict):
             med = float(np.median([v for _, v in vals]))
             hi = [f"s{s}: {v:.1f}" for s, v in vals if v > T["di_sector_warn_sigma"]]
             st = ("FAIL" if med > T["di_median_fail_sigma"] else "WARN" if hi else "PASS")
-            A.test("Centroids", "Is the dip on the target?", st,
-                   f"median offset {med:.1f} sigma over {len(vals)} sectors ({key})"
-                   + (f"; > {T['di_sector_warn_sigma']:g} sigma in {', '.join(hi)}" if hi else ""),
+            txt = (f"median offset {med:.1f} sigma over {len(vals)} sectors ({key})"
+                   + (f"; > {T['di_sector_warn_sigma']:g} sigma in {', '.join(hi)}" if hi else ""))
+            # only when the offset itself is significant: near the target
+            # many faint stars are "consistent" with a noisy centroid
+            if st == "FAIL":
+                di_hosts = _centroid_stars(run, [s for s, _ in vals], T["di_sector_warn_sigma"])
+                if di_hosts:
+                    txt += ("; the centroid is consistent (< "
+                            f"{T['di_sector_warn_sigma']:g} sigma in every sector) with "
+                            + ", ".join(f"TIC {h['ID']} (T = {h['Tmag']}, {h['sep']:.1f}\")"
+                                        for h in di_hosts[:3])
+                            + (f" and {len(di_hosts) - 3} fainter star(s)" if len(di_hosts) > 3 else ""))
+            else:
+                z, pref = _centroid_combined(run, vals, T)
+                if pref and z > T["di_median_fail_sigma"]:
+                    st, di_hosts = "FAIL", pref
+                    k = len(vals)
+                    txt += (f"; combined over the {k} sectors the target is excluded at "
+                            + (f"{z:.1f}" if np.isfinite(z) else "> 37") + " sigma, and "
+                            + ", ".join(f"TIC {h['ID']} (T = {h['Tmag']}, {h['sep']:.1f}\", "
+                                        f"chi2 {h['chi2']:.1f} for {k})" for h in pref[:3])
+                            + (f" and {len(pref) - 3} more star(s)" if len(pref) > 3 else "")
+                            + " fit the centroids better")
+            A.test("Centroids", "Is the dip on the target?", st, txt,
                    f"difference_imaging_{run.tic}.csv")
 
     # 10. neighbours
@@ -547,16 +716,29 @@ def skeptic(run: Run, A: Audit, T: dict):
     if hosts is None and nfpp is None:
         A.test("Neighbours", "Which stars can still host the signal?", "NA",
                "no NFPP input in the log", run.log_name)
-    elif hosts:
-        names = ", ".join(f"TIC {h['ID']} ({h['sep']}\", flux ratio {h['fluxratio']})" for h in hosts)
-        st = "WARN" if (nfpp or 0) > T["nfpp_warn"] else "PASS"
-        A.test("Neighbours", "Which stars can still host the signal?", st,
-               f"NFPP = {_f(nfpp, '{:.3g}')}; possible hosts: {names}", run.src(hosts[0]["line"]),
-               "ground photometry with a separate aperture on each named star clears it")
     else:
-        A.test("Neighbours", "Which stars can still host the signal?", "PASS",
-               f"no neighbour can host the signal (flux budget); NFPP = {_f(nfpp, '{:.3g}')}",
-               run.log_name)
+        # a star the difference image points to but the flux budget leaves out
+        known = {str(h["ID"]) for h in (hosts or [])}
+        missed = [h for h in di_hosts if h["ID"] not in known]
+        miss_txt = ("; difference imaging points to "
+                    + ", ".join(f"TIC {h['ID']} ({h['sep']:.1f}\")" for h in missed[:3])
+                    + ", which the flux budget does not list") if missed else ""
+        miss_adv = (" - and run the flux budget for the star(s) the difference image "
+                    "points to") if missed else ""
+        if hosts:
+            names = ", ".join(f"TIC {h['ID']} ({h['sep']}\", flux ratio {h['fluxratio']})"
+                              for h in hosts)
+            st = "WARN" if (nfpp or 0) > T["nfpp_warn"] or missed else "PASS"
+            A.test("Neighbours", "Which stars can still host the signal?", st,
+                   f"NFPP = {_f(nfpp, '{:.3g}')}; possible hosts: {names}{miss_txt}",
+                   run.src(hosts[0]["line"]),
+                   "ground photometry with a separate aperture on each named star clears it"
+                   + miss_adv)
+        else:
+            A.test("Neighbours", "Which stars can still host the signal?",
+                   "WARN" if missed else "PASS",
+                   f"no neighbour can host the signal (flux budget); NFPP = "
+                   f"{_f(nfpp, '{:.3g}')}{miss_txt}", run.log_name, miss_adv.lstrip(" -"))
 
     # 11. Monte Carlo
     dom = run.S("dominance")
@@ -599,7 +781,9 @@ def skeptic(run: Run, A: Audit, T: dict):
         A.test("Sensitivity", "Does the verdict survive a larger sigma?", "NA",
                "run without --sensitivity", run.log_name)
     else:
-        rows = [(float(m.group(1)), float(m.group(2)), float(m.group(3))) for m, _ in sens]
+        rows = sorted({float(m.group(1)): (float(m.group(1)), max(float(m.group(2)), 0.0),
+                                           max(float(m.group(3)), 0.0))
+                       for m, _ in sens}.values())
         ok = {sc: (f < 0.015 and n < 0.001) for sc, f, n in rows}
         ev = "; ".join(f"x{sc:g}: FPP {f:.3g}" + (" (passes)" if ok[sc] else "")
                        for sc, f, n in rows)
@@ -607,20 +791,38 @@ def skeptic(run: Run, A: Audit, T: dict):
         if len(set(ok.values())) > 1:
             passing = sorted(sc for sc in ok if ok[sc])
             nominal = ok.get(1.0)
+            mpool, _ = run.grep(r"\(pooled of (\d+)\)")
+            mscat, _ = run.grep(r"FPP\s+\(mean of per-run values\) = [\d.eE+-]+ \+/- ([\d.eE+-]+)")
+            if mpool and mscat:
+                ev += (f"; each scale rests on {mpool.group(1)} pooled runs, and one "
+                       f"run scatters by +/- {float(mscat.group(1)):.3g} at the nominal "
+                       f"sigma: a pass at a single scale close to 0.015 can be "
+                       f"Monte-Carlo noise (repeat with --sens-runs)")
             if nominal is False and passing and max(passing) < 1:
                 ev += ("; the verdict flips: the Giacalone criteria are met only when the noise "
                        "is assumed SMALLER than measured (x" + ", x".join(f"{p:g}" for p in passing) + ")")
                 adv = ("not a validation: a pass that needs an optimistic sigma is not robust; "
                        "check that the nominal sigma matches the out-of-transit scatter (chi2_red ~ 1)")
             elif nominal is True:
-                ev += "; the verdict flips: the nominal pass is lost at a larger sigma"
-                adv = "the validation is fragile: report it with the sensitivity table"
+                lost = sorted(sc for sc in ok if not ok[sc] and sc > 1)
+                if lost and min(lost) > T["sensitivity_max_scale"]:
+                    ev += (f"; the pass holds up to x{max(sc for sc in ok if ok[sc]):g} and is "
+                           f"lost only at x{min(lost):g} (a stress test beyond the "
+                           f"x{T['sensitivity_max_scale']:g} criterion)")
+                    adv = "report the sensitivity table with the FPP"
+                    A.test("Sensitivity", "Does the verdict survive a different sigma?",
+                           "PASS", ev, run.src(sens[0][1]), adv)
+                    ev = None
+                else:
+                    ev += "; the verdict flips: the nominal pass is lost at a larger sigma"
+                    adv = "the validation is fragile: report it with the sensitivity table"
             else:
                 ev += "; the verdict changes with sigma"
                 adv = "report the sensitivity table with the FPP"
-        A.test("Sensitivity", "Does the verdict survive a different sigma?",
-               "PASS" if len(set(ok.values())) == 1 else "WARN", ev,
-               run.src(sens[0][1]), adv)
+        if ev is not None:
+            A.test("Sensitivity", "Does the verdict survive a different sigma?",
+                   "PASS" if len(set(ok.values())) == 1 else "WARN", ev,
+                   run.src(sens[0][1]), adv)
 
     # 13. ground data
     G = run.S("ground")
@@ -646,6 +848,9 @@ def skeptic(run: Run, A: Audit, T: dict):
             st, ev = "NA", f"target {tstat}"
         A.test("Ground data", "Do ground and TESS agree?", st, ev, f"{sj}:ground")
 
+    # 13b. multi-band ground data and TRICERATOPS+
+    _multiband_test(run, A, T, sj)
+
     # 14. provenance
     mi, lni = run.grep(r"KNOWN ephemeris.*depth = ([\d.]+) ppm")
     ma, lna = run.grep(r"adopted for TRICERATOPS: depth = ([\d.]+) ppm")
@@ -670,6 +875,110 @@ def skeptic(run: Run, A: Audit, T: dict):
 # --------------------------------------------------------------------------
 # Independent recomputations from the saved light curves
 # --------------------------------------------------------------------------
+def _multiband_test(run: Run, A: Audit, T: dict, sj: str) -> None:
+    """Multi-band ground light curves: did they enter TRICERATOPS+, is the
+    depth the same in every band, and which false-positive scenarios does
+    that rule out?  Clear statements, with the numbers behind them."""
+    area, q = "Multi-band", "Is the depth the same in every band (TRICERATOPS+)?"
+    G = run.S("ground") or {}
+    lcs = G.get("lcs") or {}
+    if not lcs:
+        A.test(area, q, "NA", "no ground light curves: no colour information "
+               "beyond the TESS band", f"{sj}:ground",
+               "transits in two bands far apart (g' and z', or B and I) test "
+               "the colour of the eclipsed star; see Next observations")
+        return
+    usable = {k: v for k, v in lcs.items() if v.get("usable")}
+    bands = sorted({v.get("band") for v in usable.values()},
+                   key=lambda b: BAND_LAMBDA_UM.get(b, 0))
+    det = {k: v for k, v in usable.items() if v.get("detected")}
+    ev = [f"{len(lcs)} ground light curve(s), {len(usable)} usable, "
+          f"{len(det)} with the transit detected; bands: {', '.join(bands) or '-'}"]
+    # TRICERATOPS+
+    if G.get("plus_off"):
+        plus = "TRICERATOPS+ switched off (--tri-plus off): the FPP uses TESS only"
+    elif G.get("plus_available") is False:
+        plus = ("triceratops is not TRICERATOPS+: the ground light curves did NOT "
+                "enter the FPP (only the star clearance)")
+    elif G.get("plus_bands"):
+        plus = (f"TRICERATOPS+ used {len(G['plus_bands'])} ground light curve(s) "
+                f"in bands {', '.join(G['plus_bands'])}: the FPP already includes them")
+    elif "plus_bands" in G:
+        plus = ("no ground light curve qualified for TRICERATOPS+ (bands g r i z J H K "
+                "only, usable data)")
+    else:
+        plus = "TRICERATOPS+ use not recorded (older pipeline version)"
+    ev.append(plus)
+    if G.get("plus_not_used"):
+        ev.append("not passed to TRICERATOPS+: " + ", ".join(G["plus_not_used"])
+                  + " (one light curve per band; B, V, Clear are not TRICERATOPS+ bands"
+                  " - they still enter the colour test)")
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import triceratops_recommend as rc
+        summ = dict(run.summary or {})
+        summ.setdefault("tic", run.tic)
+        cv = rc.chromatic_verdicts(summ)
+    except Exception as exc:                                        # pragma: no cover
+        cv = None
+        ev.append(f"colour test not evaluated ({type(exc).__name__}: {exc})")
+    if not cv or not cv.get("usable"):
+        ev.append("fewer than two bands with a measured depth: no colour test")
+        A.test(area, q, "NA", "; ".join(ev), f"{sj}:ground",
+               "a transit in a second band, far from the first (e.g. g' with z'), "
+               "makes the colour test possible")
+        return
+    rb, e = cv["ratio"], cv["e_ratio"]
+    bb, br = cv["blue_band"], cv["red_band"]
+    host = "the target" if str(cv["host"]) == str(run.tic) else f"TIC {cv['host']}"
+    ev.append(f"intrinsic depth {br}/{bb} = {rb:.3f} +/- {e:.3f} if {host} is the host "
+              f"(chi2 test of a band-independent depth: p = {cv['p']:.3g}); "
+              f"a colour difference of more than {cv['detect_limit'] * 100:.0f} % "
+              f"would have been seen (3 sigma)")
+    ruled = [r for r in cv["rows"] if r["verdict"] == "ruled out"]
+    cons = [r for r in cv["rows"] if r["verdict"] == "consistent"]
+    chrom = bool(cv["chromatic"] or cv["planet_nsigma"] > 3)
+    if chrom:
+        ev.append("the measured colour fits: " + (", ".join(
+            f"{r['scenario']} (predicts {r['pred']:.2f})" for r in cons)
+            if cons else "none of the best-fit companions of the run"))
+        ruled = cons = []
+    if ruled:
+        ev.append("ruled out by the colours (best-fit companion of each scenario): "
+                  + ", ".join(f"{r['scenario']} (predicts {r['pred']:.2f}, "
+                              f"{r['nsigma']:.0f} sigma off, P = {r['prob']:.3g})"
+                              for r in ruled))
+    if cons:
+        ev.append("not distinguished by the colours: "
+                  + ", ".join(f"{r['scenario']} ({r['pred']:.2f})" for r in cons))
+    plus_used = bool(G.get("plus_bands"))
+    adv = ""
+    if chrom:
+        strong = sum(1 for v in det.values() if (v.get("snr") or 0) >= 5) >= 2
+        st = "FAIL" if strong else "WARN"
+        ev.insert(0, f"THE DEPTH DEPENDS ON THE BAND ({cv['planet_nsigma']:.1f} sigma from "
+                     f"a planet's achromatic depth): the dip is not a planet on {host}, "
+                     f"or the dilution in one of the apertures is wrong")
+        adv = ("check the comparison stars, the aperture contamination and the filter "
+               "names first; if it holds, the signal comes from a star of another colour "
+               "(eclipsing binary or blend)")
+    else:
+        st = "PASS"
+        ev.insert(0, f"the depth is the same in {bb} and {br} within "
+                     f"{cv['detect_limit'] * 100:.0f} % (3 sigma), as a planet on {host} requires")
+        if not plus_used and ruled:
+            ev.append(f"these scenarios hold P = {cv['prob_ruled_out']:.3g}; removing them "
+                      f"gives FPP = {cv['fpp_after']:.4f}, NFPP = {cv['nfpp_after']:.4f} "
+                      f"(the reported FPP does not include the ground data)")
+            adv = ("run with TRICERATOPS+ (--tri-plus on) so that the light curves "
+                   "enter the FPP itself")
+        elif cv["detect_limit"] > 0.2:
+            adv = ("the colour test is weak: a depth error of a few % per band "
+                   "(several transits, or a larger telescope) is needed to exclude "
+                   "companions of similar colour")
+    A.test(area, q, st, "; ".join(ev), f"{sj}:ground", adv)
+
+
 def _running_median(t, f, window, mask=None):
     """Median of f within +-window/2 (in t), evaluated at every point;
     points where mask is True are left out of the medians."""
@@ -687,10 +996,49 @@ def _running_median(t, f, window, mask=None):
     return out
 
 
+def _pipeline_excluded_sectors(run: Run):
+    """Sectors the pipeline dropped after writing their lc_corrected file
+    (``auto-excluded ... sector(s)`` blocks of the log)."""
+    out, inside = set(), False
+    for ln in run.log_lines:
+        if "auto-excluded" in ln:
+            inside = True
+            continue
+        if inside:
+            m = re.match(r"\s+sector\s+(\d+):", ln)
+            if m:
+                out.add(int(m.group(1)))
+                continue
+            inside = False
+    return out
+
+
+def _masked_ephemerides(run: Run):
+    """(P, T0, T14 [d]) of the other planets the pipeline masked
+    (--mask-ephemeris); the audit masks them too."""
+    out, inside = [], False
+    for ln in run.log_lines:
+        if "Transits of other known planets masked" in ln:
+            inside = True
+            continue
+        if inside:
+            m = re.search(r"P = ([\d.]+) d, T0 = ([\d.]+), T14 = ([\d.]+) h", ln)
+            if m:
+                out.append((float(m.group(1)), float(m.group(2)), float(m.group(3)) / 24.0))
+                continue
+            if ln.strip().startswith("sector"):
+                continue
+            inside = False
+    return out
+
+
 def _load_corrected(run: Run):
     out = {}
+    skip = _pipeline_excluded_sectors(run)
     for p in sorted(glob.glob(run.path(f"lc_corrected_{run.tic}_s*.txt"))):
         m = re.search(r"_s(\d+)\.txt$", p)
+        if int(m.group(1)) in skip:
+            continue
         try:
             a = np.loadtxt(p)
         except Exception:
@@ -723,10 +1071,32 @@ def recompute(run: Run, A: Audit, T: dict):
                "no ephemeris or no lc_corrected_*.txt files", run.outdir)
         return
     P, T0, dur, depth_pipe = eph
+    res0 = {"excluded_sectors": sorted(_pipeline_excluded_sectors(run)),
+            "masked_ephemerides": _masked_ephemerides(run)}
+    # a sector whose scatter is far above the others (scattered light, a
+    # failed normalisation) would dominate the fold and the sector depths
+    sig_s = {}
+    for s, a in lcs.items():
+        f0 = a[:, 1] / np.nanmedian(a[:, 1])
+        d1 = np.diff(f0)
+        sig_s[s] = 1.4826 * np.nanmedian(np.abs(d1 - np.nanmedian(d1))) / np.sqrt(2)
+    med_sig = np.nanmedian(list(sig_s.values())) if sig_s else np.nan
+    noisy = sorted(s for s, v in sig_s.items()
+                   if np.isfinite(med_sig) and med_sig > 0 and v > 10 * med_sig)
+    res0["noisy_sectors_dropped"] = noisy
     t_all, f_all, m_all, s_all, e_all = [], [], [], [], []
     win_bls = max(5 * dur, 0.75)
     for s, a in lcs.items():
+        if s in noisy:
+            continue
         t, f = a[:, 0], a[:, 1]
+        # transits of the other (masked) planets are removed as in the pipeline
+        keep_o = np.ones(t.size, bool)
+        for P_m, T0_m, d_m in res0["masked_ephemerides"]:
+            keep_o &= np.abs((t - T0_m + 0.5 * P_m) % P_m - 0.5 * P_m) > 0.75 * d_m
+        t, f = t[keep_o], f[keep_o]
+        if t.size < 50:
+            continue
         ph = (t - T0 + 0.5 * P) % P - 0.5 * P
         # (a) for the BLS: running median over 5 x T14, transits NOT masked
         #     (no knowledge of the ephemeris enters the search)
@@ -755,7 +1125,7 @@ def recompute(run: Run, A: Audit, T: dict):
     sec = np.concatenate(s_all)
     o = np.argsort(t)
     t, f, f_b, e_b, sec = t[o], f[o], f_b[o], e_b[o], sec[o]
-    res = {}
+    res = dict(res0)
 
     # (a) BLS near P with the audit's own detrending.  The peak must rest on
     #     >= 3 transits with data (sparse multi-year data make aliases that
@@ -821,7 +1191,23 @@ def recompute(run: Run, A: Audit, T: dict):
             rP = bls.power(np.array([P]), [0.8 * dur, dur, 1.2 * dur])
             prel = float(rP.power[0] / r.power[i]) if r.power[i] > 0 else np.nan
             res["bls"]["power_ratio_at_P"] = prel
-            ok = p_emp < 0.01 and (dp < T["bls_period_tol"] or prel >= 0.8)
+            # A small fractional period difference can still put the two
+            # ephemerides days apart over a long baseline: compare the
+            # predicted mid-times at the pipeline's epochs with data, with
+            # the BLS epoch numbering anchored to the pipeline's.
+            Tb = float(r.transit_time[i])
+            k0 = round((Tb - T0) / P)
+
+            def t_bls(e):
+                return Tb + (np.asarray(e, float) - k0) * Pb
+
+            st_p = bls.compute_stats(P, dur, T0)
+            tt_p = np.asarray(st_p["transit_times"], float)
+            ep_p = np.round((tt_p[np.asarray(st_p["per_transit_count"]) >= 5] - T0) / P)
+            drift = float(np.max(np.abs(t_bls(ep_p) - (T0 + ep_p * P)))) if ep_p.size else np.nan
+            same = np.isfinite(drift) and drift < T["bls_drift_tol"] * dur
+            res["bls"]["drift_h"] = drift * 24.0
+            ok = p_emp < 0.01 and (same or prel >= 0.8)
             if p_emp >= 0.01:
                 adv = "the signal is not recovered above the noise with independent detrending"
             else:
@@ -831,9 +1217,7 @@ def recompute(run: Run, A: Audit, T: dict):
                 btjd_now = _time.time() / 86400.0 + 2440587.5 - tzero
                 n_now = round((btjd_now - T0) / P)
                 t_pipe = T0 + n_now * P
-                Tb = float(r.transit_time[i])
-                t_bls = Tb + round((t_pipe - Tb) / Pb) * Pb
-                dt_h = abs(t_bls - t_pipe) * 24.0
+                dt_h = abs(float(t_bls(n_now)) - t_pipe) * 24.0
                 res["bls"]["timing_difference_now_h"] = dt_h
                 adv = (f"period ambiguity in the {'Kepler' if tzero < 2456000 else 'TESS'} data: "
                        f"at epoch {n_now} ({'BKJD' if tzero < 2456000 else 'BTJD'} "
@@ -842,8 +1226,10 @@ def recompute(run: Run, A: Audit, T: dict):
             A.test("Recomputation: BLS", "Does an independent box search find the same signal?",
                    "PASS" if ok else "WARN",
                    f"own detrending (running median {win_bls * 24:.0f} h, transits not masked): "
-                   f"best peak on >= {need} of the {n_at_P} transits with data at P = {Pb:.5f} d ({dp * 100:.3f} % from "
-                   f"{P:.5f}; {ne} transits; {skipped} stronger alias(es) on fewer transits "
+                   f"best peak with data in >= {need} of the {n_at_P} transit windows at P = {Pb:.5f} d "
+                   f"({dp * 100:.3f} % from {P:.5f}: the two ephemerides drift apart by up to "
+                   f"{drift * 24:.1f} h = {drift / dur:.2f} T14 over the data; {skipped} stronger "
+                   f"alias(es) with data in fewer windows "
                    f"skipped, top peak {float(r.period[order[0]]):.5f} d), box depth {db:.0f} ppm; box S/N at the pipeline ephemeris "
                    f"{snr_p:.1f}, at 300 random phases max {np.max(null):.1f} "
                    f"(p = {p_emp:.3g}); BLS power at P is {min(prel, 1) * 100:.0f} % of the peak",
@@ -874,21 +1260,46 @@ def recompute(run: Run, A: Audit, T: dict):
                          on_target_ppm=float(dpt / g * 1e6) if g else None))
     res["sector_depths"] = rows
     if len(rows) >= 2:
-        d = np.array([r["depth_ppm"] for r in rows])
-        e = np.array([r["err_ppm"] for r in rows])
+        # depths on the target (aperture depth / g) where g is known; the
+        # errors get a systematic floor for the sector-to-sector
+        # reproducibility of TESS depths (background, aperture, detrending):
+        # for a deep transit on a bright star the white-noise errors alone
+        # are far smaller than that
+        use_g = all(r["on_target_ppm"] is not None for r in rows)
+        key = "on_target_ppm" if use_g else "depth_ppm"
+        d = np.array([r[key] for r in rows])
+        e_stat = np.array([r["err_ppm"] for r in rows])
+        mu0 = np.median(d)
+        sysf = T["sector_depth_sys_frac"]
+        e = np.sqrt(e_stat ** 2 + (sysf * mu0) ** 2)
         w = 1 / e ** 2
         mu = np.sum(w * d) / np.sum(w)
         chi = float(np.sum(w * (d - mu) ** 2) / (len(rows) - 1))
+        chi_stat = float(np.sum((d - mu) ** 2 / e_stat ** 2) / (len(rows) - 1))
+        res["sector_depth_chi2_stat"] = chi_stat
         st = "WARN" if chi > T["sector_depth_chi2_warn"] else "PASS"
         worst = rows[int(np.argmax(np.abs(d - mu) / e))]
         A.test("Recomputation: sectors", "Do the sectors give the same depth?", st,
-               f"{len(rows)} sectors, mean box depth {mu:.0f} ppm, chi2/dof {chi:.2f}; "
-               f"most deviant sector {worst['sector']} ({worst['depth_ppm']:.0f} +/- "
-               f"{worst['err_ppm']:.0f} ppm)", f"lc_corrected_{run.tic}_s*.txt")
+               f"{len(rows)} sectors, mean box depth {mu:.0f} ppm"
+               f"{' on the target' if use_g else ''}, spread {np.std(d) / mu * 100:.1f} %, "
+               f"chi2/dof {chi:.2f} with a {sysf * 100:.1f} % systematic floor "
+               f"({chi_stat:.1f} with white-noise errors only); most deviant sector "
+               f"{worst['sector']} ({worst[key]:.0f} +/- {worst['err_ppm']:.0f} ppm)"
+               + (f"; sectors left out as in the pipeline: "
+                  f"{', '.join(str(x) for x in res['excluded_sectors'])}"
+                  if res.get("excluded_sectors") else "")
+               + (f"; too noisy (> 10 x the median scatter): "
+                  f"{', '.join(str(x) for x in res['noisy_sectors_dropped'])}"
+                  if res.get("noisy_sectors_dropped") else ""),
+               f"lc_corrected_{run.tic}_s*.txt",
+               "" if st == "PASS" else
+               "the depth differs between sectors beyond the usual reproducibility: "
+               "check the apertures and the contamination per sector")
     else:
         A.test("Recomputation: sectors", "Do the sectors give the same depth?", "NA",
                "fewer than two sectors with in-transit data", "")
     res["_series"] = (t, f, P, T0, dur)
+    res["depth_pipe_ppm"] = depth_pipe
     A.recomputations = res
 
 
@@ -930,6 +1341,9 @@ def to_text(A: Audit) -> str:
             L.append(f"        {'':24s} source: {t.source}")
         if t.advice:
             L.append(f"        {'':24s} -> {t.advice}")
+    if A.next_observations:
+        L += ["", "NEXT OBSERVATIONS - what each kind of follow-up can remove"]
+        L += ["  " + ln for ln in A.next_observations]
     return "\n".join(L)
 
 
@@ -985,6 +1399,37 @@ def to_pdf(A: Audit, path):
             y = yy - 0.012
         pdf.savefig(fig)
         plt.close(fig)
+        # page: next observations
+        if A.next_observations:
+            fig = plt.figure(figsize=(8.27, 11.69))
+            y = 0.96
+            fig.text(0.06, y, "Next observations - what each kind of follow-up can remove",
+                     fontsize=11.5, weight="bold")
+            y -= 0.018
+            fig.text(0.06, y, "best case = every scenario the observation addresses is ruled "
+                              "out; typical = imaging misses close companions,", fontsize=6.8,
+                     color="0.4")
+            y -= 0.013
+            fig.text(0.06, y, "spectroscopy coinciding velocities, a band test colours that are "
+                              "too similar", fontsize=6.8, color="0.4")
+            y -= 0.026
+            for raw in A.next_observations:
+                ind = len(raw) - len(raw.lstrip())
+                bold = bool(raw[:3].strip().rstrip(".").isdigit()) or raw.startswith(
+                    ("Shortest", "FPP", "From the"))
+                for k, ln in enumerate(textwrap.wrap(raw.strip(), 112 - ind) or [""]):
+                    if y < 0.04:
+                        pdf.savefig(fig)
+                        plt.close(fig)
+                        fig = plt.figure(figsize=(8.27, 11.69))
+                        y = 0.96
+                    fig.text(0.06 + 0.006 * ind + (0.02 if k else 0), y, ln,
+                             fontsize=7.6 if bold else 7.2,
+                             weight="bold" if bold and k == 0 else "normal",
+                             color="#1a4f8a" if raw.lstrip().startswith("how:") else "k")
+                    y -= 0.0145
+            pdf.savefig(fig)
+            plt.close(fig)
         # page: evaluation table
         fig = plt.figure(figsize=(8.27, 11.69))
         y = 0.96
@@ -1021,6 +1466,13 @@ def to_pdf(A: Audit, path):
                 xb = [ph[k][idx == i].mean() for i in np.unique(idx) if (idx == i).sum() > 3]
                 yb = [np.median(f[k][idx == i]) for i in np.unique(idx) if (idx == i).sum() > 3]
                 axs[0].plot(xb, yb, "o", ms=3, color="k")
+            if k.sum() > 30:
+                # robust y-range: a few bad cadences must not flatten the transit
+                lo, hi = np.nanpercentile(f[k], [0.5, 99.5])
+                dpt = (R.get("depth_pipe_ppm") or 0) * 1e-6
+                lo = min(lo, 1 - 1.3 * dpt) if dpt > 0 else lo
+                pad = 0.1 * (hi - lo)
+                axs[0].set_ylim(lo - pad, hi + pad)
             axs[0].set_xlabel("hours from mid-transit (pipeline ephemeris)")
             axs[0].set_ylabel("flux (audit's own detrending)")
             axs[0].set_title("Fold of the lc_corrected files with the audit's own detrending "
@@ -1049,7 +1501,52 @@ def run_audit(outdir, tic=None, recompute_lc=True, thresholds=None):
     skeptic(run, A, T)
     if recompute_lc:
         recompute(run, A, T)
+    next_observations(run, A)
     return A
+
+
+def next_observations(run: Run, A: Audit) -> None:
+    """Recommended follow-up: what each kind of observation can remove from
+    FPP / NFPP (triceratops_recommend.py), plus the advice of the audit's
+    own WARN / FAIL tests."""
+    lines = []
+    rec = run.S("recommendations")
+    if isinstance(rec, dict) and rec.get("text"):
+        lines = list(rec["text"])
+        lines.append("(from the run: pooled scenario probabilities)")
+    else:
+        try:
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            import triceratops_recommend as rc
+            rows = run.S("scenario_probs") or rc.parse_log_table(run.log or "")
+            if rows:
+                summ = dict(run.summary or {})
+                summ["scenario_probs"] = rows
+                if not summ.get("neighbours"):
+                    hosts = _neighbour_hosts(run) or []
+                    summ["neighbours"] = [dict(ID=int(h["ID"]), sep=float(h["sep"]),
+                                               Tmag=float(h["Tmag"]),
+                                               fluxratio=float(h["fluxratio"]),
+                                               tdepth=float(h["tdepth"]))
+                                          for h in hosts]
+                res = rc.recommend(summ, seeing_fwhm=3.0)
+                lines = list(res["text"])
+                lines.append("(computed by the audit from "
+                             + ("the scenario table in summary.json" if run.S("scenario_probs")
+                                else "the last-iteration scenario table of the log, "
+                                     "not the pooled probabilities") + ")")
+        except Exception as exc:                                  # pragma: no cover
+            lines = [f"recommendations not computed: {type(exc).__name__}: {exc}"]
+    mb = next((t for t in A.tests if t.area == "Multi-band"), None)
+    if mb is not None and mb.status in ("PASS", "FAIL", "WARN"):
+        lines.append("Multi-band transits already in hand: "
+                     + mb.evidence.split("; ")[0])
+    extra = [f"{t.area}: {t.advice}" for t in A.tests
+             if t.status in ("FAIL", "WARN") and t.advice]
+    if extra:
+        lines.append("From the audit's own tests:")
+        lines += [f"  - {e}" for e in extra]
+    A.next_observations = lines
 
 
 def main(argv=None):

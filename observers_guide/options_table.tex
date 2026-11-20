@@ -1,0 +1,92 @@
+\subsection*{Tab: Target \& ephemeris}
+\begin{longtable}{@{}p{0.2\textwidth}p{0.22\textwidth}p{0.1\textwidth}p{0.4\textwidth}@{}}
+\toprule \textbf{GUI field} & \textbf{Command line} & \textbf{Default} & \textbf{Meaning}\\ \midrule\endhead
+TIC ID & \code{--tic TIC} & required & TIC ID of the target (Kepler mode: looked up from \code{--kic} when not given).\\
+Mission (TESS / Kepler) & \code{--mission tess|kepler} & tess & tess (default) or kepler: Kepler long-cadence light curves and pixel files per quarter; times in BKJD (BJD - 2454833); needs \code{--kic}.\\
+KIC ID (Kepler) & \code{--kic KIC} & -- & Kepler Input Catalog number (with \code{--mission} kepler).\\
+Host star for TRICERATOPS (TIC) & \code{--host-tic TIC} & -- & Star that TRICERATOPS treats as the host (e.g. a close companion); the light curve and pixels stay those of \code{--tic} / \code{--kic}.  The light curve is then used on the aperture scale (SAP,\allowbreak{} no dilution correction).\\
+Stellar parameters from & \code{--star-source tic|kepler} & tic & Host-star R,\allowbreak{} M,\allowbreak{} Teff,\allowbreak{} logg: tic (default) or kepler (Berger et al. 2020 Gaia-Kepler catalogue,\allowbreak{} else the Kepler DR25 stellar table; needs \code{--kic}).\\
+Manual R M Teff [logg] & \code{--stellar X ...} & -- & Manual host-star parameters R[Rsun] M[Msun] Teff[K] [logg]; override \code{--star-source}.\\
+Output folder & \code{--outdir OUTDIR} & -- & Output directory (default: TIC\{tic\}/ in the CWD). Created automatically if missing.\\
+Known ephemeris & \code{--ephemeris P_D T0_BTJD DEPTH_PPM T14_H} & -- & Known ephemeris for THIS target (skips the TLS search): period [d],\allowbreak{} T0 [BTJD; BKJD with \code{--mission} kepler; or the full BJD\_TDB],\allowbreak{} depth [ppm],\allowbreak{} duration [h].\\
+Mask other planets (P T0 T14\_h ...) & \code{--mask-ephemeris X ...} & -- & Mask the transits of other known planets in the system: P T0 T14\_H for each (repeat the three values for more planets; T0 as for \code{--ephemeris}).  Cadences within 0.75 x T14 of their mid-times are removed.\\
+Blind TLS search & \code{--blind-search} & off & Force a blind TLS search (default when \code{--ephemeris} is not given).\\
+TLS period min [d] & \code{--p-min D} & -- & TLS period\_min [d] (default: 0.5).  Narrow the grid when you know the approximate period.\\
+TLS period max [d] & \code{--p-max D} & -- & TLS period\_max [d] (default: 100,\allowbreak{} also clipped to baseline/n\_transits\_min at runtime).\\
+Ephemeris check & \code{--ephem-search auto|scan|grid|off} & auto & With \code{--ephemeris}: how to check/refine P and T0 before detrending. scan = box search of each transit + robust linear fit; grid = folded box search on a (P,\allowbreak{} T0) grid (stacks all transits,\allowbreak{} for shallow signals); auto = scan,\allowbreak{} grid if the scan is inconclusive (default); off = keep the input.\\
+No ephemeris check & \code{--no-ephem-scan} & off & Same as \code{--ephem-search} off.\\
+Scan half-width [h] & \code{--ephem-scan-hours H} & -- & Half-width of the search in T0 [h],\allowbreak{} for scan and grid (default: max(2 x T14,\allowbreak{} 12 h)).\\
+Grid half-range in P [d] & \code{--ephem-grid-dp D} & -- & Grid search: half-range in P [d] (default: the T0 half-range divided by the number of epochs from the reference epoch).\\
+Grid min. S/N & \code{--ephem-grid-min-snr X} & -- & Grid search: minimum stacked S/N to adopt the result (default 7).\\
+Do not refine P, T0 from transits & \code{--no-refine-ephemeris} & off & Do not refine P and T0 from the individual transit mid-times.\\
+Refine: max chi2\_red & \code{--refine-chi2-max X} & -- & Max chi2\_red of the linear timing fit before the refined ephemeris is rejected (default: 8).  Raise for long-period targets with few transits.\\
+Refine: max prediction error [T14] & \code{--ephem-adopt-max-sigma F} & -- & A refined ephemeris is adopted only if it predicts every epoch with data to within F x T14 (1 sigma; default 0.25).\\
+Fixed mid-times in per-transit fits & \code{--no-tc-fit} & off & Keep the mid-time of each individual transit fixed at the ephemeris value.\\
+\bottomrule\end{longtable}
+\subsection*{Tab: Light curve}
+\begin{longtable}{@{}p{0.2\textwidth}p{0.22\textwidth}p{0.1\textwidth}p{0.4\textwidth}@{}}
+\toprule \textbf{GUI field} & \textbf{Command line} & \textbf{Default} & \textbf{Meaning}\\ \midrule\endhead
+Light-curve source & \code{--lc-source tesscut|sap|pdcsap} & tesscut & Photometry: tesscut (FFI custom aperture,\allowbreak{} default),\allowbreak{} sap (SPOC SAP),\allowbreak{} or pdcsap (SPOC PDC). For sap/pdcsap the SPOC TPF is still fetched when available.\\
+TESScut cache folder & \code{--download-dir DOWNLOAD_DIR} & -- & TESScut / SPOC cache directory (default: \textless{}outdir\textgreater{}/tesscut\_cache). Already-downloaded products are reused.\\
+Only download the cutouts (no analysis) & \code{--prefetch-only} & off & Only download the TESScut cutouts this run would read (every sector,\allowbreak{} every cutout size) into the cache,\allowbreak{} then stop. Use with \code{--download-dir} to prepare runs in advance.\\
+MAST timeout [s] & \code{--net-timeout NET_TIMEOUT} & 300.0 & Seconds a MAST request or TESScut download may wait for data before it is abandoned and retried (0: no limit,\allowbreak{} as astroquery). Default 300.\\
+MAST attempts & \code{--net-retries NET_RETRIES} & 4 & Attempts for each MAST query and TESScut download,\allowbreak{} with pauses of 30,\allowbreak{} 60,\allowbreak{} 90 s ... between them. Default 4.\\
+Exclude sectors & \code{--exclude-sectors S ...} & -- & Sector numbers to drop before extraction (e.g. \code{--exclude-sectors} 56 79).\\
+No automatic sector exclusion & \code{--no-auto-exclude-sectors} & off & Do not auto-drop sectors that fail normalisation quality cuts after detrending.\\
+Max sector rms & \code{--sector-max-rms SECTOR_MAX_RMS} & -- & Max robust RMS of norm\_flux (fractional; default 0.02).\\
+Aperture & \code{--aperture optimal|percentile} & optimal & TESScut aperture: S/N-optimal from a catalogue PSF model (default) or pixels above the 85th percentile.\\
+Dilution correction & \code{--dilution-mode sector|none} & sector & sector (default): put every sector on the target's flux scale with its own target fraction before folding; none: keep raw aperture flux.\\
+Raw aperture flux & \code{--raw-aperture-flux} & off & Pass dilution\_corrected=False to triceratops (flux is an uncorrected aperture LC). Needs triceratops \textgreater{}= 1.1.\\
+Light curve is dilution corrected & \code{--dilution-corrected} & off & Tell TRICERATOPS the light curve is crowding-corrected (automatic with \code{--dilution-mode} sector and for pdcsap).\\
+Detrend windows [d] & \code{--detrend-windows D ...} & -- & First-pass biweight windows [d]; the blind TLS search runs once per window and the highest-SDE candidate is kept (e.g. 0.75 1.0 1.5 2.5).\\
+Error floor [ppm] & \code{--err-floor-ppm ERR_FLOOR_PPM} & 0.0 & Lower bound on the flux uncertainty given to calc\_probs [ppm].\\
+Do not inflate sigma & \code{--no-inflate} & off & Do not inflate sigma to chi2\_red = 1 of the reference model.\\
+\bottomrule\end{longtable}
+\subsection*{Tab: Shape \& tests}
+\begin{longtable}{@{}p{0.2\textwidth}p{0.22\textwidth}p{0.1\textwidth}p{0.4\textwidth}@{}}
+\toprule \textbf{GUI field} & \textbf{Command line} & \textbf{Default} & \textbf{Meaning}\\ \midrule\endhead
+Limb-darkened fit & \code{--ld-fit} & off & Fit the folded LC with a limb-darkened transit model (u1,\allowbreak{}u2 fixed to the Claret values of the TIC/TLS catalogue) and use it as reference model for the sigma inflation.\\
+LD coefficients free & \code{--ld-free} & off & Like \code{--ld-fit},\allowbreak{} but fit the limb-darkening coefficients (Kipping q1,\allowbreak{}q2).\\
+LD coefficients u1 u2 & \code{--ld-coeffs U1 U2} & -- & Like \code{--ld-fit},\allowbreak{} with fixed quadratic coefficients.\\
+No secondary-eclipse search & \code{--no-secondary-search} & off & Skip the secondary-eclipse search at all phases.\\
+Secondary min. S/N & \code{--secondary-min-snr X} & -- & Stacked S/N for a secondary-eclipse detection (default 7).\\
+Red-noise scrambles & \code{--red-noise-scrambles N} & 0 & Phase-randomisation trials for a red-noise false-alarm p-value on the stacked depth (0 disables; try 1000–5000).\\
+Red-noise seed & \code{--red-noise-seed RED_NOISE_SEED} & 42 & RNG seed for \code{--red-noise-scrambles}.\\
+No timing analysis & \code{--no-etv} & off & Skip the eclipse-timing / depth-variation analysis.\\
+Extra mid-times file & \code{--extra-times FILE} & -- & Ground-based mid-times to add to the timing analysis: 'BJD\_TDB err\_min [label]' per line.\\
+\bottomrule\end{longtable}
+\subsection*{Tab: Field}
+\begin{longtable}{@{}p{0.2\textwidth}p{0.22\textwidth}p{0.1\textwidth}p{0.4\textwidth}@{}}
+\toprule \textbf{GUI field} & \textbf{Command line} & \textbf{Default} & \textbf{Meaning}\\ \midrule\endhead
+Contrast curve & \code{--contrast-curve FILE} & -- & High-resolution imaging contrast curve: separation [arcsec],\allowbreak{} delta mag.\\
+Vet neighbours & \code{--vet-neighbours} & off & Vet nearby stars from their own TESS light curves and exclude those that cannot host the signal.\\
+No difference imaging & \code{--no-difference-imaging} & off & Skip the difference-image centroid analysis.\\
+Exclude stars (TIC) & \code{--exclude-stars TIC ...} & -- & Stars cleared by other follow-up (removed before calc\_probs).\\
+\bottomrule\end{longtable}
+\subsection*{Tab: TRICERATOPS}
+\begin{longtable}{@{}p{0.2\textwidth}p{0.22\textwidth}p{0.1\textwidth}p{0.4\textwidth}@{}}
+\toprule \textbf{GUI field} & \textbf{Command line} & \textbf{Default} & \textbf{Meaning}\\ \midrule\endhead
+Min. runs (n\_iter) & \code{--n-iter N_ITER} & 20 & Minimum number of TRICERATOPS calc\_probs runs (more are added until converged).\\
+Samples per run (N) & \code{--n-samples N} & -- & Monte-Carlo draws per scenario in calc\_probs (default: triceratops default,\allowbreak{} 1e6). Raise when the log reports that the evidence is dominated by one run.\\
+Do not pool runs & \code{--no-pool} & off & Do not pool the scenario evidences over the runs; report the mean of the per-run FPPs instead.\\
+Sensitivity runs & \code{--sensitivity} & off & Also report FPP/NFPP at several flux-uncertainty scales (extra calc\_probs runs).\\
+Runs per sensitivity case & \code{--sens-runs SENS_RUNS} & 3 & calc\_probs runs per scale for \code{--sensitivity} (pooled).\\
+Model exposure [min] & \code{--tri-exptime-min M} & -- & Exposure smoothing of the TRICERATOPS models [min] (default: bin width + native cadences; 0 = package default of 2 min).\\
+Max. runs & \code{--tri-max-iter N} & -- & Maximum calc\_probs runs while not converged (default 3 x \code{--n-iter}).\\
+Time budget [s] & \code{--tri-time-budget S} & -- & Time budget for the extra runs [s] (default 3600).\\
+TRILEGAL / field-star file & \code{--trilegal-fname TRILEGAL_FNAME} & -- & Pre-downloaded TRILEGAL table for triceratops (skips the SSL-sensitive online query).\\
+TRICERATOPS+ & \code{--tri-plus auto|on|off} & auto & Pass ground light curves to calc\_probs when the installed triceratops is TRICERATOPS+ (auto,\allowbreak{} default),\allowbreak{} require it (on) or never (off).\\
+Verdict from FPP/NFPP only (ignore own EB tests) & \code{--no-eb-veto} & off & Let the verdict depend on FPP/NFPP only,\allowbreak{} even when the pipeline detects a secondary eclipse,\allowbreak{} an odd/even difference or an absent parity.\\
+Imaging inner working angle for advice ["] & \code{--hires-iwa ARCSEC} & -- & Inner working angle of high-resolution imaging in the observation recommendations (default 0.1).\\
+\bottomrule\end{longtable}
+\subsection*{Tab: Ground photometry}
+\begin{longtable}{@{}p{0.2\textwidth}p{0.22\textwidth}p{0.1\textwidth}p{0.4\textwidth}@{}}
+\toprule \textbf{GUI field} & \textbf{Command line} & \textbf{Default} & \textbf{Meaning}\\ \midrule\endhead
+Ground light curves & \code{--ground-lc SPEC} & -- & Ground-based light curve (repeatable): 'path,\allowbreak{}band=r,\allowbreak{}star=TIC,\allowbreak{}ap=4.0,\allowbreak{}fwhm=2.5,\allowbreak{}obs=CODE,\allowbreak{}detrend=poly1,\allowbreak{}AIRMASS'. band: B V R I g r i z J H K (Rc=R,\allowbreak{} Sloan r'=r); star: TIC at the aperture centre (default: target); ap: aperture RADIUS [arcsec]; fwhm: seeing [arcsec]; time=BJD\_TDB (default) | JD\_UTC | HJD\_UTC; fcol/ecol/tcol: column names; mag=1 for magnitudes.\\
+Ground list file & \code{--ground-list FILE} & -- & File with one \code{--ground-lc} specification per line (paths relative to that file).\\
+Do not remove cleared stars & \code{--ground-no-clear} & off & Report the ground clearance but do not remove stars from TRICERATOPS.\\
+Mid-time window [min] & \code{--ground-tc-window MIN} & -- & Minimum half-width of the ground mid-time search [min] (default 60; widened to 3 sigma of the TESS ephemeris).\\
+Detection S/N & \code{--ground-min-snr GROUND_MIN_SNR} & -- & Detection threshold for ground light curves (default 5).\\
+Depth tolerance & \code{--ground-depth-tol GROUND_DEPTH_TOL} & -- & Fractional tolerance on the expected ground depth (default 0.25).\\
+Default seeing ["] & \code{--ground-fwhm ARCSEC} & -- & Seeing FWHM used when a light curve gives none (default 3.0).\\
+\bottomrule\end{longtable}

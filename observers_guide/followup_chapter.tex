@@ -1,0 +1,133 @@
+%% ----------------------------------------------------------------------
+\chapter{Planning the follow-up: the audit and the next observations}
+\label{ch:followup}
+
+A run ends with an FPP and an NFPP, but the more useful question for an
+observer is: \emph{which observation would change them most?} The pipeline
+answers it at the end of every run, and the audit repeats the answer with its
+own checks.
+
+\section{The idea}
+TRICERATOPS splits the probability over its scenarios (Chapter~2). The FPP is
+the sum of the false-positive scenarios, and each kind of follow-up
+observation can rule out a known group of them:
+
+\begin{longtable}{@{}p{0.27\textwidth}p{0.3\textwidth}p{0.36\textwidth}@{}}
+\toprule
+\textbf{Observation} & \textbf{Scenarios it can remove} & \textbf{How}\\
+\midrule\endhead
+Ground photometry with a separate aperture on the target and on each nearby star & NTP, NEB, NEBx2P on stars wider than the seeing (\code{--ground-fwhm}, default 3$''$) & The star that shows the dip is the host. One good transit is enough.\\
+High-resolution imaging (speckle, adaptive optics) & bound companions (PEB, PEBx2P, STP, SEB, SEBx2P), background stars (DEB, DEBx2P, BTP, BEB, BEBx2P), neighbours closer than the seeing & A contrast curve; it sees companions outside its inner working angle (\code{--hires-iwa}, default 0.1$''$).\\
+Reconnaissance spectroscopy (2--3 epochs, $\sim$1~km\,s$^{-1}$) & EB and EBx2P on the target; bright bound companions & A stellar companion on the target gives a radial-velocity amplitude of km\,s$^{-1}$; a bright companion shows its own set of lines (SB2), also closer than imaging can resolve.\\
+Transits in two or more filters & scenarios in which the dip comes from, or is diluted by, a star of another colour & A planet on the target has the same depth in every band.\\
+\bottomrule
+\end{longtable}
+
+For every observation the pipeline computes what the FPP and NFPP would become
+if the scenarios it addresses were ruled out:
+\[
+\mathrm{FPP}' = \frac{\sum_{\rm FP\ kept} p_i}{\sum_{\rm all\ kept} p_i},
+\qquad
+\mathrm{NFPP}' = \frac{\sum_{\rm NTP,NEB\ kept} p_i}{\sum_{\rm all\ kept} p_i},
+\]
+where $p_i$ are the pooled scenario probabilities of the run. It then
+searches the shortest combination of observations that would bring FPP and
+NFPP below the validation limits.
+
+\section{Best case and typical outcome}
+No observation removes everything it addresses. The guide therefore gives two
+numbers per observation:
+\begin{description}
+\item[Best case:] every scenario the observation addresses is ruled out.
+\item[Typical:] only the part an observation of that kind usually reaches:
+\begin{itemize}
+\item \emph{imaging}: the bound companions wider than the inner working angle.
+With the separation distribution of Sun-like binaries (Raghavan et al.\ 2010)
+and 0.1$''$ at 373~pc (37~au) that is about half of them; background stars:
+95\%;
+\item \emph{spectroscopy}: 70\% of the bright companions (their velocity can
+coincide with that of the target);
+\item \emph{multi-band transits}: the share of possible companions whose
+colour differs enough to change the depth by more than 20\% between the two
+filters (below); background stars, whose colour is unknown: 50\%;
+\item \emph{ground photometry}: all of the resolved neighbours.
+\end{itemize}
+\end{description}
+These typical fractions are reasonable assumptions, not measurements. They
+rank the observations; they do not predict their outcome. And an observation
+can also \emph{find} a false positive: if the ground light curve shows the dip
+on the neighbour, the candidate is a nearby eclipsing binary, whatever the
+numbers said.
+
+\section{The colour test in detail}
+If the dip comes from star X and is diluted by star Y, the observed depth in a
+band is the true depth times the share of X in the light of that band:
+\[
+\delta_{\rm band} = \delta_X \,\frac{F_{X,{\rm band}}}{F_{X,{\rm band}} + F_{Y,{\rm band}}} .
+\]
+The share changes with the band when X and Y have different temperatures.
+The pipeline approximates both stars by blackbodies (g$'$ at 0.48~$\mu$m,
+z$'$ at 0.91~$\mu$m, TESS at 0.80~$\mu$m) and estimates the temperature of a
+companion from its mass with a main-sequence relation
+($T_{\rm eff} \approx 5772~{\rm K}\,(M/M_\odot)^{0.6}$):
+\begin{itemize}
+\item \textbf{STP, SEB} (dip on the companion): a redder companion makes the
+dip deeper in z$'$ than in g$'$ (ratio below 1);
+\item \textbf{PEB} (dip on the target, diluted by the companion): only a small
+effect, a few percent;
+\item \textbf{planet on the target}: ratio 1, apart from limb darkening.
+\end{itemize}
+How large the effect is depends on the companion, which the TESS data hardly
+constrain. The pipeline therefore runs over all possible companions (mass
+ratio 0.1--1, flat distribution), keeps those bright enough to produce the dip
+at all (for STP a planet of at most two Jupiter radii, for SEB an eclipse of at
+most 100\%), and counts the share that changes the depth by more than 20\%.
+The best fit of the last TRICERATOPS run is shown as an example together with
+the precision that a band test would need (three times the depth error must
+fit in the depth difference).
+
+\input{molusc_section.tex}
+
+\section{Where to find it}
+\begin{itemize}
+\item at the end of the log, section \emph{Next observations};
+\item in \code{recommendations_<tic>.txt} and in \code{summary_<tic>.json}
+(\code{recommendations});
+\item on the page \emph{Next observations} of the audit report
+(Figure~\ref{fig:audit-next}), together with the advice of the audit's own
+tests.
+\end{itemize}
+
+\section{The audit}
+\code{triceratops_audit.py} reads an output folder and tries to break the
+claim of the run, with deterministic checks only (no language model). The GUI
+starts it with the button \emph{Audit run} on the tab \emph{Results} or from
+the menu \emph{Tools}; it writes \code{audit_<tic>.pdf}, \code{.txt} and
+\code{.json} and opens the PDF. The input files are never changed.
+
+The report has four parts:
+\begin{enumerate}
+\item \textbf{Skeptic}: 17 tests with PASS, WARN, FAIL or NA, each with its
+evidence, the file and line it comes from, and an advice (ephemeris,
+single events, depth consistency, odd/even, secondary eclipse, shape and
+density, dilution, centroids, neighbours, Monte-Carlo convergence,
+sensitivity, ground data, multi-band colours and TRICERATOPS+
+(Section~\ref{sec:multiband}), provenance of the input depth, and two
+independent recomputations from the saved light curves, which leave out the
+sectors the pipeline excluded and the transits of masked candidates);
+\item \textbf{Next observations} (this chapter);
+\item \textbf{Evaluation}: every claim of the run with its source;
+\item \textbf{Recomputation}: the audit's own fold and per-sector depths.
+\end{enumerate}
+A FAIL does not change the pipeline's verdict; it marks a claim that needs a
+closer look before the result is reported.
+
+\begin{figure}[p]
+\centering
+\includegraphics[page=3,height=0.86\textheight,trim=0 25mm 0 0,clip]{audit_65344135.pdf}
+\caption{Audit of TIC~65344135 (run of 12~November 2026), page \emph{Next
+observations}. Ground photometry with separate apertures removes the
+neighbour (FPP $0.391 \rightarrow 0.026$); spectroscopy or a colour test then
+removes most of the rest.}
+\label{fig:audit-next}
+\end{figure}

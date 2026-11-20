@@ -1,0 +1,111 @@
+\section{Companions that Gaia already excludes: MOLUSC}
+\label{sec:molusc}
+
+\subsection*{Why}
+Several false-positive scenarios of TRICERATOPS need an unresolved
+\emph{bound companion} of the target: PTP and PEB (the companion dilutes
+the dip), STP and SEB (the dip is on the companion). Without other
+information TRICERATOPS uses a general prior: how often stars of this mass
+have a companion, and with which masses and separations (Moe \& Di~Stefano
+2017). For many nearby stars that prior is too pessimistic: Gaia has
+observed them for years, and a bright companion at the right distance would
+have shown up. MOLUSC (\emph{Multi-Observational Limits on Unseen Stellar
+Companions}, Wood, Mann \& Kraus 2021, AJ~162, 128) turns those
+non-detections into a list of the companions that are still allowed. It
+costs no telescope time.
+
+\subsection*{How MOLUSC works}
+\begin{enumerate}
+\item \textbf{Simulate.} It draws a large number of companions (typically
+$10^6$) for the target: mass ratio $q$ uniform between 0 and 1, a log-normal
+period distribution (Raghavan et al.\ 2010), and random eccentricity,
+inclination, orientation and orbital phase. Each simulated star has
+exactly \emph{one} companion.
+\item \textbf{Predict what each companion would have done}, with the
+stellar models of Baraffe et al.\ (2015) for its brightness:
+\begin{itemize}
+\item \emph{Gaia astrometry (RUWE).} A companion at roughly 0.1--1$''$
+makes the photocentre wobble and raises the RUWE (renormalised unit weight
+error) of the Gaia solution. MOLUSC predicts the RUWE for every simulated
+companion and rejects those whose prediction is clearly larger than the
+observed value.
+\item \emph{Gaia imaging.} A companion bright enough and far enough from the
+star (beyond about 1$''$) would be a separate Gaia source.
+\item \emph{Optional:} a high-resolution contrast curve (speckle, AO) and
+radial-velocity measurements. With RVs, close companions (a few au and
+less) can be excluded as well.
+\end{itemize}
+\item \textbf{Keep the survivors.} The file \code{<prefix>_kept.csv} lists
+the companions that none of the data would have seen.
+\end{enumerate}
+The rejections are probabilistic (a companion is rejected with the
+probability that it would have been detected), so a run with $10^6$
+companions gives smooth distributions.
+
+\subsection*{How the pipeline uses it}
+\begin{enumerate}
+\item \textbf{Run MOLUSC.} A copy with a few small fixes (newer SciPy/NumPy, a VizieR fallback) is
+in the folder \code{MOLUSC} (see \code{README_pipeline.txt}). For each target a
+short script gives the coordinates and the mass, e.g.\ for L~279-94:
+\begin{lstlisting}
+bash MOLUSC/run_molusc_L27994.sh       # in WSL, about 10 min
+# -> TIC100796276_molusc/L27994_N1000000_kept.csv
+\end{lstlisting}
+MOLUSC needs the Gaia archive; when it does not answer (for instance while
+it is closed for the DR4 release), the same Gaia DR3 values are read from
+VizieR.
+\item \textbf{Give the file to the pipeline:} GUI tab \emph{Field},
+``MOLUSC companions file'' (\code{--molusc-file}) and ``MOLUSC: companions
+generated'' (\code{--molusc-n}, the number MOLUSC simulated).
+\item \textbf{What happens inside.} TRICERATOPS(+) takes the mass ratios of
+the MOLUSC companions for the first draws of the PTP, PEB, STP and SEB
+scenarios, and treats the remaining draws as ``no companion''. Two details
+matter:
+\begin{itemize}
+\item It keeps only companions whose orbit never comes closer than 10~au to
+the star (periastron $a(1-e) > 10$~au). Planets are rare in such close
+binaries (Moe \& Kratter 2021), so TRICERATOPS assumes they do not exist
+there.
+\item The prior probability of a companion then becomes (number of
+companions in the file)/(number of TRICERATOPS draws, $10^6$). Used as is,
+the FPP would depend on how many companions one happened to simulate in
+MOLUSC, and a file with more than $10^6$ survivors would crash
+TRICERATOPS. The pipeline therefore resamples the survivors so that this
+probability equals the MOLUSC survival fraction times an assumed
+multiplicity (\code{--molusc-multiplicity}, default 1: every star has a
+companion, the conservative choice).
+\end{itemize}
+The log lists the numbers: companions generated, kept, kept beyond 10~au,
+the resulting prior, and their mass-ratio distribution. The audit names
+the companion prior that was used (\emph{Evaluation}).
+\end{enumerate}
+
+\subsection*{Limitations}
+\begin{itemize}
+\item \textbf{It removes only what Gaia could have seen.} Companions very
+close to the star (periastron $\lesssim$1~au) hardly change the RUWE and are
+not resolved; without RV data they all survive. That they do not count in
+the FPP is the \emph{assumption} that planets avoid close binaries, not a
+measurement. A result that relies on MOLUSC should say so, and spectroscopy
+(RVs or a second set of lines) is the observation that tests it.
+\item \textbf{The RUWE is not only a binary indicator.} Variability, a
+nearby source or a poor fit also raise it; a high RUWE makes MOLUSC reject
+\emph{fewer} companions, which is safe. A RUWE that is low by chance would
+make it reject too many.
+\item \textbf{Models and distributions.} The companion population
+(Raghavan), the stellar models (BHAC15, default age 5~Gyr) and the RUWE
+calibration of the MOLUSC tables are assumptions; for very young or
+evolved stars they matter.
+\item \textbf{One companion per star.} Triples are not simulated. The
+multiplicity (fraction of stars that have a companion at all) is not part
+of MOLUSC; the pipeline uses 1 unless told otherwise, which overestimates
+the companion probability (about a quarter of M dwarfs have one,
+Winters et al.\ 2019).
+\item \textbf{Different versions, different answers.} TRICERATOPS 1.1.0
+treats the MOLUSC companions differently from the TRICERATOPS+ version
+used here; the Zenodo note on L~279-94 obtains FPPs between 0.003 and 0.042
+depending on such choices. Report the FPP with the companion model.
+\item \textbf{Not a replacement for high-resolution imaging.} MOLUSC shows
+that the companions which would invalidate the planet are \emph{unlikely};
+an image or RVs show whether one is \emph{there}.
+\end{itemize}

@@ -86,6 +86,155 @@ def test_scan_recovers_drifting_ephemeris(tmp_path):
     assert abs(P1 - P_TRUE) < 2e-3
 
 
+def test_scan_does_not_adopt_fit_to_clustered_transits(tmp_path):
+    # Early sectors too noisy for single transits, the
+    # last two sectors clean.  A fit to the late transits only must not be
+    # extrapolated over the whole baseline.
+    P, T0, dur, dep = 7.4421, 1570.30, 1.4 / 24, 1500e-6
+    rng = np.random.default_rng(7)
+    early = _times(10.0, ((1569, 1595), (2283, 2309), (3010, 3036)))
+    late = _times(200 / 60, ((4080, 4106), (4107, 4133)))
+    t = np.concatenate([early, late])
+    sig = np.where(t < 4000, 0.010, 0.0006)
+    f = _box(t, P, T0, dur, dep) + rng.normal(0, 1, t.size) * sig
+    cfg = _cfg(tmp_path)
+    P1, T01, fit = tv.check_known_ephemeris(t, f, sig, P, T0, dur, cfg)
+    assert fit is not None and max(fit["epochs"]) - min(fit["epochs"]) < 10
+    assert (P1, T01) == (P, T0)
+    assert fit["ok"] is False          # 'auto' then falls back to the grid
+
+
+def test_scan_does_not_rescan_with_a_short_baseline_fit(tmp_path):
+    # The input ephemeris is right, but four strong dips early in the data
+    # sit on a slightly different period, and a later sector has dips on that
+    # period's extrapolation (in real data: noise peaks).  A first-pass fit of
+    # the early dips does not constrain the late epochs; rescanning with it
+    # would lock onto the late dips and adopt the wrong period.
+    P, T0, dur, dep = 2.0, 1000.0, 0.05, 3000e-6
+    P_wrong = P + 1.0 / 150             # 1 d (half a period) off by epoch 150
+    rng = np.random.default_rng(11)
+    t = np.concatenate([np.arange(999.0, 1025.0, 2 / 1440),
+                        np.arange(1290.0, 1310.0, 2 / 1440)])
+    f = 1.0 + rng.normal(0, 3e-4, t.size)
+    for e in (1, 2, 11, 12, *range(145, 156)):
+        f[np.abs(t - (T0 + e * P_wrong)) < 0.5 * dur] -= dep
+    cfg = _cfg(tmp_path)
+    P1, T01, fit = tv.check_known_ephemeris(t, f, np.full(t.size, 3e-4), P, T0, dur, cfg)
+    assert fit is not None and max(fit["epochs"]) <= 12, fit
+    assert (P1, T01) == (P, T0)
+    assert fit["ok"] is False
+
+
+def test_net_retry_retries_then_gives_up(monkeypatch):
+    monkeypatch.setitem(tv.NET, "wait", 0.0)
+    monkeypatch.setitem(tv.NET, "retries", 3)
+    calls = []
+
+    def flaky(x, fail=2):
+        calls.append(x)
+        if len(calls) <= fail:
+            raise ConnectionError("MAST stopped responding")
+        return x * 2
+
+    assert tv._net_retry(flaky, 21) == 42 and len(calls) == 3
+    calls.clear()
+    with pytest.raises(ConnectionError):
+        tv._net_retry(flaky, 1, fail=5)
+    assert len(calls) == 3
+
+
+def test_network_timeout_fills_in_only_a_missing_timeout(monkeypatch):
+    from astroquery.query import BaseQuery
+    seen = []
+
+    def rec_request(self, method, url, params=None, timeout=None, **kw):
+        seen.append(timeout)
+
+    def rec_download(self, url, local_filepath, timeout=None, **kw):
+        seen.append(timeout)
+
+    monkeypatch.setattr(BaseQuery, "_request", rec_request)
+    monkeypatch.setattr(BaseQuery, "_download_file", rec_download)
+    monkeypatch.setitem(tv.NET, "timeout", tv.NET["timeout"])
+    q = BaseQuery()
+    tv.set_network_timeout(42)
+    q._request("GET", "u")                        # astroquery's MAST calls: no timeout
+    q._request("GET", "u", timeout=5)             # an explicit timeout is kept
+    q._download_file("u", "f")                    # TESScut download: no timeout
+    q._download_file("u", "f", None)              # passed positionally: left alone
+    tv.set_network_timeout(42)                    # idempotent: no double wrapping
+    q._download_file("u", "f", timeout=None)
+    tv.set_network_timeout(0)                     # 0 restores astroquery's behaviour
+    q._request("GET", "u")
+    assert seen == [42, 5, 42, None, 42, None]
+    assert BaseQuery._request is rec_request
+
+
+def test_prefetch_downloads_every_size_a_run_reads(tmp_path, monkeypatch):
+    import json
+    cfg = _cfg(tmp_path, exclude_sectors=[33])
+    assert tv.prefetch_cutout_sizes(cfg) == [10, 22]          # photometry, TRICERATOPS
+    cfg.vet_neighbours = True
+    assert tv.prefetch_cutout_sizes(cfg) == [10, 22, 23]      # + neighbour vetting
+    seen = {}
+    monkeypatch.setattr(tv, "find_tess_sectors",
+                        lambda tic, cfg=None, use_cache=True:
+                        seen.update(use_cache=use_cache) or np.array([6, 33, 87]))
+    cached = {(6, 10)}
+    monkeypatch.setattr(tv, "_find_cached_tesscut",
+                        lambda root, s, size, tic, cfg: "x" if (s, size) in cached else None)
+    got = []
+
+    def fake_load(tic, s, size, cfg, **kw):
+        if (s, size) == (87, 23):
+            raise RuntimeError("MAST 502")
+        got.append((s, size))
+
+    monkeypatch.setattr(tv, "_load_tesscut_tpf", fake_load)
+    rec = tv.prefetch_tesscut(cfg)
+    assert seen["use_cache"] is False       # the full sector list, never the cached subset
+    assert got == [(6, 22), (6, 23), (87, 10), (87, 22)]     # sector 33 excluded
+    assert rec["cached"] == 1 and rec["downloaded"] == 4
+    assert rec["failed"] == [dict(sector=87, size=23, error="MAST 502")]
+    on_disk = json.load(open(cfg.path("prefetch_TIC1.json")))
+    assert on_disk["sectors"] == [6, 87] and on_disk["sizes"] == [10, 22, 23]
+
+
+def test_refine_from_transits_needs_full_baseline(tmp_path):
+    cfg = _cfg(tmp_path)
+    dur = 1.3 / 24
+
+    def dt_for(epochs, slope_min):
+        return np.array([(int(e), 1570.3 + e * 7.4421, 1.5e-3, 2e-4, 100, 1.0,
+                          (e - epochs[0]) * slope_min / 1440 + 0.5 / 1440 * (-1) ** i,
+                          3.0 / 1440, 7.0, 50.0)
+                         for i, e in enumerate(epochs)], dtype=tv._PT_DTYPE)
+
+    clustered = dt_for([312, 313, 315], 2.0)
+    r = tv.refine_ephemeris_from_transits(clustered, 7.4421, 1570.3, dur, cfg,
+                                          epochs_data=[0, 1, 90, 180, 312, 313, 315])
+    assert r["updated"] is False and r["worst_epoch"] == 0
+    spread = dt_for([0, 1, 90, 180, 312, 313, 315], 0.01)
+    r = tv.refine_ephemeris_from_transits(spread, 7.4421, 1570.3, dur, cfg)
+    assert r["updated"] is True
+
+
+def test_mask_other_transits():
+    t = np.arange(0.0, 30.0, 0.01)
+    sd = SimpleNamespace(time=t, flux=np.ones(t.size), flux_err=np.ones(t.size),
+                         cen_x=np.zeros(t.size), cen_y=np.zeros(t.size))
+    n = tv.mask_other_transits(sd, [(10.0, 5.0, 0.2)])      # transits at 5, 15, 25
+    assert sd.time.size == t.size - n and 80 < n < 100       # 3 x 0.3 d
+    assert sd.flux.size == sd.cen_y.size == sd.time.size
+    assert np.min(np.abs(((sd.time - 5.0 + 5.0) % 10.0) - 5.0)) >= 0.15 - 1e-9
+
+
+def test_transit_edge_distance():
+    t = np.concatenate([np.arange(100.0, 110.0, 0.01), np.arange(110.5, 120.0, 0.01)])
+    d = tv.transit_edge_distance(t, [100.2, 105.0, 109.8, 110.7, 130.0])
+    assert np.allclose(d, [0.2, 5.0, 0.19, 0.2, 0.0], atol=0.02)
+
+
 def test_grid_finds_shallow_transit(tmp_path):
     t = _times(cad_min=3.33)
     P, T0, dep = 50.123, 1700.40, 1500e-6
@@ -233,6 +382,39 @@ def test_etv_recovers_ltte_and_odd_even(tmp_path):
     assert abs(out2["odd_even_dt_min"] - 3.0) < 0.5
 
 
+def test_etv_significance_scaled_when_errors_underestimated(tmp_path):
+    # TOI-7930.02-like: pure timing noise of 18 min with quoted errors of
+    # 4 min (chi2_red ~ 20).  Nothing should look significant.
+    cfg = _cfg(tmp_path)
+    rng = np.random.default_rng(3)
+    E = np.sort(rng.choice(np.arange(0, 800), 26, replace=False))
+    oc = rng.normal(0, 18.0 / 1440, E.size)
+    dt = np.array([(int(e), T0_TRUE + e * 3.18, 1e-3, 3e-4, 40, 1.0,
+                    o, 4.0 / 1440, 3.0, 9.0) for e, o in zip(E, oc)],
+                  dtype=tv._PT_DTYPE)
+    out = tv.etv_analysis(dt, 3.18, T0_TRUE, cfg, 1)
+    assert out["chi2_red"] > 8
+    assert abs(out["odd_even_dt_min"]) / out["odd_even_dt_err_min"] < 3
+    assert out["ltte_dchi2"] < 15 and out["dchi2_quad"] < 9
+
+
+def test_missing_parity_points_to_2p():
+    def diag(depths):
+        dt = np.array([(e, T0_TRUE + e * 3.0, d, 2.5e-4, 40, 1.0, 0.0, 0.003, d / 2.5e-4, 0.0)
+                       for e, d in depths], dtype=tv._PT_DTYPE)
+        return tv.depth_diagnostics(dt)
+    # every transit at even epochs, none at the two odd ones: period is 2P
+    d = diag([(0, 1.1e-3), (2, 0.9e-3), (102, 1.2e-3), (103, -0.4e-3),
+              (104, 1.0e-3), (351, 0.1e-3), (352, 0.95e-3)])
+    assert tv.missing_parity(d) == "odd"
+    # an EB at P with a shallower but detected secondary: not "absent"
+    d = diag([(0, 1.1e-3), (1, 0.6e-3), (2, 1.0e-3), (3, 0.55e-3), (4, 1.05e-3)])
+    assert tv.missing_parity(d) is None
+    # equal depths
+    d = diag([(e, 1.0e-3) for e in range(6)])
+    assert tv.missing_parity(d) is None
+
+
 # ------------------------------------------------------------ helpers
 def test_exptime_kwargs_and_effective_exposure(tmp_path):
     cfg = _cfg(tmp_path)
@@ -307,3 +489,196 @@ def test_run_triceratops_converges_classes_and_exptime(tmp_path, monkeypatch):
     assert cls and abs(sum(cls.values()) - 1.0) < 1e-6
     eb = [v for k, v in cls.items() if k.startswith("eclipsing binary")][0]
     assert eb > 0.99
+
+
+# ---- open issues 5-7 of the KESTREL comparison (S. Price, Nov 2026) --------
+def test_eb_evidence_secondary_and_parity():
+    import triceratops_validation as tv
+    from types import SimpleNamespace
+    cfg = SimpleNamespace(eb_veto_odd_even_sigma=3.0)
+    ev = tv.eb_evidence({"secondary": {"detected": True, "phase": 0.5,
+                                       "depth_ppm": 4477.0},
+                         "odd_even_sigma": 3.7}, cfg)
+    assert len(ev) == 2 and "phase 0.500" in ev[0] and "3.7 sigma" in ev[1]
+    ev = tv.eb_evidence({"missing_parity": "odd", "odd_even_sigma": 7.1}, cfg)
+    assert len(ev) == 1 and "2P" in ev[0]
+    assert tv.eb_evidence({"secondary": {"detected": False},
+                           "odd_even_sigma": 1.2}, cfg) == []
+
+
+def test_ld_depth_kept_when_b_unconstrained():
+    import triceratops_validation as tv
+    from types import SimpleNamespace
+    cfg = SimpleNamespace(ld_b_unconstrained_err=0.3, ld_depth_max_sigma=3.0)
+    diag = {"depth": 210e-6, "depth_err": 15e-6}
+    loose = {"depth_ppm": 154.0, "params": {"b": (0.2, 12.0)}}
+    stuck = {"depth_ppm": 154.0, "params": {"b": (0.0, 7e-5)}}
+    far = {"depth_ppm": 154.0, "params": {"b": (0.5, 0.05)}}
+    ok = {"depth_ppm": 220.0, "params": {"b": (0.9, 0.012)}}
+    assert "unconstrained" in tv.ld_depth_keep_reason(loose, 210e-6, diag, cfg)
+    assert "b = 0" in tv.ld_depth_keep_reason(stuck, 210e-6, diag, cfg)
+    assert "sigma" in tv.ld_depth_keep_reason(far, 210e-6, diag, cfg)
+    assert tv.ld_depth_keep_reason(ok, 210e-6, diag, cfg) == ""
+
+
+def test_in_dir_restores_cwd(tmp_path):
+    import os
+    import triceratops_validation as tv
+    old = os.getcwd()
+    with tv._in_dir(str(tmp_path / "out")):
+        open("x_gaia_background.csv", "w").write("a")
+    assert os.getcwd() == old
+    assert (tmp_path / "out" / "x_gaia_background.csv").exists()
+
+
+def test_hot_jupiter_occultation_is_not_eb_evidence():
+    import triceratops_validation as tv
+    from types import SimpleNamespace
+    cfg = SimpleNamespace(eb_veto_odd_even_sigma=3.0, eb_veto_planet_tmax=4000.0,
+                          eb_veto_planet_depth_ratio=0.1)
+    S = {"secondary": {"detected": True, "phase": 0.5, "depth_ppm": 340.0,
+                       "companion_T_K": 3100.0}, "depth_ppm_adopted": 9500.0}
+    assert tv.eb_evidence(S, cfg) == [] and S["eb_hints"]
+    S = {"secondary": {"detected": True, "phase": 0.5, "depth_ppm": 3000.0,
+                       "companion_T_K": 5200.0}, "depth_ppm_adopted": 9500.0}
+    assert len(tv.eb_evidence(S, cfg)) == 1
+
+
+def test_refine_ephemeris_not_fooled_by_a_wide_box():
+    """WASP-18b regression: refine_ephemeris was given the transit-MASK
+    duration (5 x T14); T0 wandered by hours and the trapezoid became 9 h
+    long and 100 ppm deep.  The box duration is now chosen by S/N."""
+    import numpy as np
+    import triceratops_validation as tv
+    rng = np.random.default_rng(7)
+    P, T0, d, depth = 0.941452, 1354.4555, 1.9 / 24, 0.0106
+    t = np.arange(1354.1, 1354.1 + 60, 2 / 1440)
+    ph = (t - T0 + 0.5 * P) % P - 0.5 * P
+    f = 1 + 3e-4 * rng.standard_normal(t.size)
+    f[np.abs(ph) < 0.5 * d] -= depth
+    e = np.full(t.size, 3e-4)
+    for dur_in in (d, 5 * d, 0.1 * d):
+        P2, T02, d2, dep2 = tv.refine_ephemeris(t, f, e, P, T0 + 0.02, dur_in,
+                                                extra_durs=(d,))
+        n = round((T02 - T0) / P)
+        assert abs(T02 - n * P2 - T0) < 0.01
+        assert 0.7 * d < d2 < 1.4 * d
+        assert 0.8 * depth < dep2 < 1.2 * depth
+
+
+def test_secondary_centre_not_pulled_by_a_phase_curve():
+    # WASP-18 b-like: occultation at phase 0.5 on top of an asymmetric
+    # phase curve; the box search alone peaked at 0.515-0.519
+    rng = np.random.default_rng(7)
+    P, T0, dur = 0.9414538, 1354.4545, 2.19 / 24
+    t = np.arange(1354.0, 1354.0 + 60.0, 2 / 1440)
+    ph = ((t - T0) / P) % 1.0
+    f = 1.0 + 4e-4 * rng.standard_normal(t.size)
+    f += 180e-6 * np.cos(4 * np.pi * ph) * -1          # ellipsoidal
+    f += 150e-6 * np.sin(2 * np.pi * (ph - 0.15))      # asymmetric term
+    occ = np.abs(ph - 0.5) < 0.5 * dur / P
+    f[occ] -= 400e-6
+    r = tv.secondary_eclipse_search(t, f, P, T0, dur, min_snr=7.0)
+    assert r["detected"]
+    assert abs(r["phase"] - 0.5) < 0.004, r["phase"]
+
+
+def test_clean_cube_drops_scattered_light_but_keeps_the_transit():
+    rng = np.random.default_rng(1)
+    n = 2000
+    t = np.linspace(0, 20, n)
+    yy, xx = np.mgrid[0:10, 0:10]
+    psf = 1e4 * np.exp(-((xx - 4.5) ** 2 + (yy - 4.5) ** 2) / 2.0)
+    cube = np.repeat(psf[None], n, axis=0) + 80.0 + rng.normal(0, 3, (n, 10, 10))
+    intr = (t % 2.0) < 0.1
+    cube[intr] -= 0.01 * psf                       # 1 % transit
+    bad = rng.choice(n, 100, replace=False)
+    cube[bad] += rng.uniform(500, 3000, 100)[:, None, None]
+    t2, c2 = tv._clean_cube(t, cube)
+    kept = np.isin(t, t2)
+    assert not kept[bad].any()
+    assert kept[intr & ~np.isin(np.arange(n), bad)].all()
+
+
+def test_tls_template_folded_on_its_own_ephemeris():
+    # the TLS model is built with TLS's period; folding it on the refined
+    # period over a long baseline shifted every per-transit mid-time
+    # (WASP-18: +10 min, O-C rms 10 min)
+    from types import SimpleNamespace
+    rng = np.random.default_rng(2)
+    P, T0, dur, depth = 0.9414538, 1354.4545, 1.9 / 24, 0.0106
+    t = np.concatenate([np.arange(a, a + 25, 10 / 1440)
+                        for a in (1354, 2100, 3200, 3900, 4150)])
+
+    def model(tt, PP, TT):
+        ph = (tt - TT + 0.5 * PP) % PP - 0.5 * PP
+        return 1 - depth * np.clip((0.5 * dur - np.abs(ph)) / (0.1 * dur), 0, 1)
+    f = model(t, P, T0) + 3e-4 * rng.standard_normal(t.size)
+    e = np.full(t.size, 3e-4)
+    Ptls, T0tls = P + 6e-6, T0 + 0.002
+    res = SimpleNamespace(period=Ptls, T0=T0tls, duration=dur, depth=1 - depth,
+                          model_lightcurve_time=t,
+                          model_lightcurve_model=model(t, Ptls, T0tls))
+    dt = tv.per_transit_depths(t, f, e, res, tv.Config(), P=P, T0=T0, dur=dur)
+    assert abs(np.median(dt["dTc"]) * 1440) < 2.0
+    assert np.std(dt["dTc"]) * 1440 < 6.0
+
+
+def _mdwarf_fold(seed=3, noise=900e-6):
+    rng = np.random.default_rng(seed)
+    P, rp, b, aRs = 18.1522, 0.0571, 0.32, 59.2
+    t = np.arange(-0.25, 0.25, 5 / 1440)
+    f = tv.limb_darkened_lc(t, P, rp, aRs, b, 0.16, 0.43, exp_time=5 / 1440)
+    return P, t, f + noise * rng.standard_normal(t.size)
+
+
+def test_ld_fit_density_prior_pulls_to_the_catalogue_branch():
+    P, t, f = _mdwarf_fold()
+    cfg = tv.Config()
+    rho_cat = 1.41 * 0.403 / 0.4106 ** 3          # L 279-94, TIC
+    fit = tv.fit_limb_darkened(t, f, P, 2.36 / 24, 0.0036, cfg,
+                               u_claret=(0.16, 0.43), exp_time=5 / 1440,
+                               rho_prior=(rho_cat, 0.3))
+    assert 1 / 3 < fit["rho_star_cgs"] / rho_cat < 3
+    assert abs(fit["T14_h"] - 2.36) < 0.4
+
+
+def test_ld_fit_refits_when_density_is_implausible():
+    import types
+    P, t, f = _mdwarf_fold()
+    lc = types.SimpleNamespace(time=types.SimpleNamespace(value=t),
+                               flux=types.SimpleNamespace(value=f))
+    cfg = tv.Config()
+    tp = np.repeat(t, 3)                           # >= 3 points per bin
+    # a catalogue density 30x lower than the true one forces the refit
+    star = dict(mass=0.403 / 30, rad=0.4106, u=(0.16, 0.43))
+    fit = tv.fit_limb_darkened_lc(tp, lc, P, 2.36 / 24, 0.0036, star, [], cfg)
+    assert "unconstrained_fit" in fit and fit.get("rho_prior")
+
+
+def test_molusc_file_is_resampled_to_the_survival_fraction(tmp_path):
+    import pandas as pd
+    rng = np.random.default_rng(4)
+    n_gen, n_kept = 10000, 3000
+    a = 10 ** rng.uniform(-1, 3, n_kept)
+    e = rng.uniform(0, 0.8, n_kept)
+    df = pd.DataFrame({"mass ratio": rng.uniform(0.1, 1, n_kept), "period(days)": 1.0,
+                       "semi-major axis(AU)": a, "cos_i": 0.0, "eccentricity": e,
+                       "arg periastron": 0.0, "phase": 0.0})
+    fn = tmp_path / "x_kept.csv"
+    df.to_csv(fn, index=False)
+    cfg = tv.Config(outdir=str(tmp_path))
+    cfg.molusc_file, cfg.molusc_n, cfg.tri_N = str(fn), n_gen, 100000
+    info = tv.prepare_molusc_for_triceratops(cfg, 123)
+    n10 = int(np.sum(a * (1 - e) > 10))
+    assert info["n_kept_10au"] == n10
+    assert info["n_rows"] == round(100000 * n10 / n_gen)
+    out = pd.read_csv(info["file"])
+    assert len(out) == info["n_rows"] and (out["semi-major axis(AU)"]
+                                           * (1 - out["eccentricity"]) > 10).all()
+    # the prior no longer depends on how many companions MOLUSC generated
+    cfg.molusc_multiplicity = 0.27
+    assert tv.prepare_molusc_for_triceratops(cfg, 123)["n_rows"] == round(100000 * 0.27 * n10 / n_gen)
+    cfg.molusc_n = None
+    with pytest.raises(ValueError):
+        tv.prepare_molusc_for_triceratops(cfg, 123)

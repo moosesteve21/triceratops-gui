@@ -16,7 +16,8 @@ TIC = 999000001
 P, T0, T14_H, DEPTH = 12.3456, 2000.0, 4.0, 4000.0
 
 
-def _make_folder(tmp, depth_ppm=DEPTH, weak_sector=None, log_extra=""):
+def _make_folder(tmp, depth_ppm=DEPTH, weak_sector=None, log_extra="",
+                 summary_extra=None, period=P):
     rng = np.random.default_rng(3)
     dur = T14_H / 24
     for k, s in enumerate((10, 11, 12, 37, 38)):
@@ -29,11 +30,11 @@ def _make_folder(tmp, depth_ppm=DEPTH, weak_sector=None, log_extra=""):
         f[np.abs(ph) < dur / 2] -= d
         np.savetxt(os.path.join(tmp, f"lc_corrected_{TIC}_s{s}.txt"), np.c_[t, f, np.full(t.size, 6e-4)])
     log = (f"triceratops_validation.py v4.1.1\n"
-           f"Adopted ephemeris: P = {P} d, T0 = {T0}, T14 = {T14_H} h, depth = {depth_ppm:.0f} ppm\n"
+           f"Adopted ephemeris: P = {period} d, T0 = {T0}, T14 = {T14_H} h, depth = {depth_ppm:.0f} ppm\n"
            + log_extra)
     open(os.path.join(tmp, f"triceratops_output_TIC{TIC}.txt"), "w").write(log)
-    json.dump({"tic": TIC, "P_d": P, "T0_BTJD": T0, "T14_h": T14_H,
-               "depth_ppm_adopted": depth_ppm},
+    json.dump({"tic": TIC, "P_d": period, "T0_BTJD": T0, "T14_h": T14_H,
+               "depth_ppm_adopted": depth_ppm, **(summary_extra or {})},
               open(os.path.join(tmp, f"summary_{TIC}.json"), "w"))
     return tmp
 
@@ -52,6 +53,13 @@ def test_recovers_injected_signal(tmp_path):
 def test_no_signal_is_not_recovered(tmp_path):
     A = ta.run_audit(_make_folder(str(tmp_path), depth_ppm=0.0))
     assert _tests(A)["Recomputation: BLS"].status == "WARN"
+
+
+def test_small_period_error_that_drifts_is_not_a_pass(tmp_path):
+    # 0.05 % in P is ~4 h of drift over this baseline (T14 = 4 h)
+    A = ta.run_audit(_make_folder(str(tmp_path), period=P * 1.0005))
+    t = _tests(A)["Recomputation: BLS"]
+    assert t.status == "WARN" and "drift apart" in t.evidence, t.evidence
 
 
 def test_deviant_sector_flagged(tmp_path):
@@ -78,8 +86,117 @@ def test_outputs_written(tmp_path):
 
 def test_threshold_override(tmp_path):
     folder = _make_folder(str(tmp_path))
-    A = ta.run_audit(folder, thresholds={"bls_period_tol": 1e-9}, recompute_lc=False)
-    assert A.thresholds["bls_period_tol"] == 1e-9
+    A = ta.run_audit(folder, thresholds={"bls_drift_tol": 1e-9}, recompute_lc=False)
+    assert A.thresholds["bls_drift_tol"] == 1e-9
+
+
+def test_failure_carried_by_edge_transits_stays_a_failure(tmp_path):
+    # the edge transits are named and the tests reported without them, but a
+    # transit next to a gap can be real, so the FAIL is not downgraded
+    extra = dict(depth_chi2_red=9.5, depth_chi2_red_excl_edge=1.2,
+                 odd_even_sigma=6.5, odd_even_sigma_excl_edge=0.8,
+                 edge_transit_epochs=[57])
+    A = ta.run_audit(_make_folder(str(tmp_path), summary_extra=extra), recompute_lc=False)
+    T = _tests(A)
+    for area in ("Depth consistency", "Odd/even"):
+        t = T[area]
+        assert t.status == "FAIL" and "data gap" in t.evidence, t.evidence
+        assert "inspect" in t.advice, t.advice
+    extra.update(depth_chi2_red_excl_edge=9.0, odd_even_sigma_excl_edge=6.0)
+    A = ta.run_audit(_make_folder(str(tmp_path), summary_extra=extra), recompute_lc=False)
+    assert _tests(A)["Depth consistency"].advice == ""
+    assert _tests(A)["Odd/even"].status == "FAIL"
+
+
+def test_absent_odd_transits_advise_2p(tmp_path):
+    extra = dict(odd_even_sigma=5.5, missing_parity="odd", P_d=6.5,
+                 depth_odd_ppm=-120.0, depth_odd_err_ppm=180.0,
+                 depth_even_ppm=1050.0, depth_even_err_ppm=110.0)
+    A = ta.run_audit(_make_folder(str(tmp_path), summary_extra=extra), recompute_lc=False)
+    t = _tests(A)["Odd/even"]
+    assert t.status == "FAIL" and "no transit at the odd epochs" in t.evidence, t.evidence
+    assert "2P = 13.000000 d" in t.advice, t.advice
+
+
+def test_density_with_b_at_the_fit_limit(tmp_path):
+    # a fit stuck at b = 0 reports a tiny formal error; b is not constrained
+    log = ("  b    = 0.00000 +/- 0.00007\n"
+           "  rho_star (circular orbit) = 25.0 g/cm^3\n"
+           "  rho_star from TIC mass/radius       = 2.5 g/cm^3   (consistency check)\n")
+    extra = {"ld_fit": {"rp": 0.0400, "b": 1.5e-6, "grazing": False, "T14_h": 1.5}}
+    A = ta.run_audit(_make_folder(str(tmp_path), log_extra=log, summary_extra=extra),
+                     recompute_lc=False)
+    t = _tests(A)["Shape"]
+    assert t.status == "PASS" and "b = 0.92" in t.evidence, t.evidence
+
+
+def test_density_with_unconstrained_b(tmp_path):
+    def shape(rho_fit, rho_cat):
+        log = (f"  b    = 0.10000 +/- 40.00000\n"
+               f"  rho_star (circular orbit) = {rho_fit} g/cm^3\n"
+               f"  rho_star from TIC mass/radius       = {rho_cat} g/cm^3   (consistency check)\n")
+        extra = {"ld_fit": {"rp": 0.0400, "b": 0.1000, "grazing": False, "T14_h": 1.5}}
+        A = ta.run_audit(_make_folder(str(tmp_path), log_extra=log, summary_extra=extra),
+                         recompute_lc=False)
+        return _tests(A)["Shape"]
+    t = shape(25.0, 2.5)                # a higher b explains it
+    assert t.status == "PASS" and "b = 0.92" in t.evidence, t.evidence
+    t = shape(1.0, 5.0)                 # too long even for a central transit
+    assert t.status == "WARN" and "stellar density" in t.evidence, t.evidence
+
+
+def test_centroid_names_the_star_it_points_to(tmp_path):
+    folder = _make_folder(str(tmp_path), log_extra="NFPP = 0.2 +/- 0.01   [bootstrap over runs]\n")
+    with open(os.path.join(folder, f"difference_imaging_{TIC}.csv"), "w") as fh:
+        fh.write("sector,snr,offset_direct_sigma\n17,6.0,3.8\n24,30.0,4.4\n")
+    with open(os.path.join(folder, f"difference_imaging_stars_{TIC}.csv"), "w") as fh:
+        fh.write("sector,ID,is_target,sep_target_arcsec,n_sigma\n"
+                 f"17,{TIC},True,0.0,3.6\n24,{TIC},True,0.0,4.8\n"
+                 "17,111,False,75.0,0.3\n24,111,False,75.0,0.2\n"      # both sectors
+                 "17,222,False,90.0,0.5\n24,222,False,90.0,5.9\n")     # one sector only
+    with open(os.path.join(folder, f"field_TIC{TIC}.csv"), "w") as fh:
+        fh.write(f"ID,ra,dec,Tmag\n{TIC},0,0,10.5\n111,0,0,9.8\n222,0,0,12.0\n")
+    T = _tests(ta.run_audit(folder, recompute_lc=False))
+    assert "TIC 111 (T = 9.80" in T["Centroids"].evidence and "TIC 222" not in T["Centroids"].evidence
+    assert T["Neighbours"].status == "WARN" and "TIC 111" in T["Neighbours"].evidence
+    # a marginal offset (WARN, median < 3 sigma) that no star fits clearly
+    # better than the target names no stars
+    with open(os.path.join(folder, f"difference_imaging_{TIC}.csv"), "w") as fh:
+        fh.write("sector,snr,offset_direct_sigma\n17,6.0,0.6\n24,30.0,3.4\n")
+    with open(os.path.join(folder, f"difference_imaging_stars_{TIC}.csv"), "w") as fh:
+        fh.write("sector,ID,is_target,sep_target_arcsec,n_sigma\n"
+                 f"17,{TIC},True,0.0,0.6\n24,{TIC},True,0.0,3.4\n"
+                 "17,111,False,8.0,1.5\n24,111,False,8.0,2.0\n")
+    T = _tests(ta.run_audit(folder, recompute_lc=False))
+    assert T["Centroids"].status == "WARN" and "TIC 111" not in T["Centroids"].evidence
+    assert T["Neighbours"].status == "PASS", T["Neighbours"].evidence
+
+
+def _centroid_folder(tmp, target_sigma, star_sigma):
+    folder = _make_folder(tmp, log_extra="NFPP = 0.2 +/- 0.01   [bootstrap over runs]\n")
+    secs = (7, 8, 34, 35, 61)
+    with open(os.path.join(folder, f"difference_imaging_{TIC}.csv"), "w") as fh:
+        fh.write("sector,snr,offset_direct_sigma\n"
+                 + "".join(f"{s},5.0,{v}\n" for s, v in zip(secs, target_sigma)))
+    with open(os.path.join(folder, f"difference_imaging_stars_{TIC}.csv"), "w") as fh:
+        fh.write("sector,ID,is_target,sep_target_arcsec,n_sigma\n"
+                 + "".join(f"{s},{TIC},True,0.0,{v}\n" for s, v in zip(secs, target_sigma))
+                 + "".join(f"{s},111,False,50.0,{v}\n" for s, v in zip(secs, star_sigma)))
+    with open(os.path.join(folder, f"field_TIC{TIC}.csv"), "w") as fh:
+        fh.write(f"ID,ra,dec,Tmag\n{TIC},0,0,10.5\n111,0,0,13.9\n")
+    return _tests(ta.run_audit(folder, recompute_lc=False))
+
+
+def test_centroid_offsets_combined_over_sectors(tmp_path):
+    # every sector alone is below 3 sigma, but all five point to the same
+    # star: combined, the target is excluded and that star fits
+    T = _centroid_folder(str(tmp_path), (2.5, 2.8, 2.2, 2.6, 2.9), (0.3, 0.4, 0.2, 0.5, 0.3))
+    t = T["Centroids"]
+    assert t.status == "FAIL" and "combined" in t.evidence and "TIC 111" in t.evidence, t.evidence
+    assert T["Neighbours"].status == "WARN" and "TIC 111" in T["Neighbours"].evidence
+    # the same offsets with no star that fits them (scatter, not a blend)
+    T = _centroid_folder(str(tmp_path), (2.5, 2.8, 2.2, 2.6, 2.9), (2.9, 3.5, 2.4, 3.1, 2.7))
+    assert T["Centroids"].status != "FAIL" and "TIC 111" not in T["Centroids"].evidence
 
 
 def test_audit_never_changes_inputs(tmp_path):
@@ -88,3 +205,103 @@ def test_audit_never_changes_inputs(tmp_path):
     ta.main([folder])
     for f, m in before.items():
         assert os.path.getmtime(os.path.join(folder, f)) == m
+
+
+def test_hot_planet_occultation_is_a_warning_not_a_failure(tmp_path):
+    sec = dict(detected=True, phase=0.5016, depth_ppm=392.0, companion_T_K=3020.0)
+    extra = dict(secondary=sec, depth_on_target_ppm=10900.0,
+                 eb_hints=["... the occultation of a hot planet ..."])
+    t = _tests(ta.run_audit(_make_folder(str(tmp_path), summary_extra=extra),
+                            recompute_lc=False))["Secondary"]
+    assert t.status == "WARN" and "occultation" in t.evidence, t.evidence
+    # same numbers, no hint from the pipeline: the audit applies the rule itself
+    extra.pop("eb_hints")
+    t = _tests(ta.run_audit(_make_folder(str(tmp_path), summary_extra=extra),
+                            recompute_lc=False))["Secondary"]
+    assert t.status == "WARN", t.evidence
+    # a deep, hot secondary stays a failure
+    extra["secondary"] = dict(detected=True, phase=0.5, depth_ppm=4000.0, companion_T_K=5200.0)
+    t = _tests(ta.run_audit(_make_folder(str(tmp_path), summary_extra=extra),
+                            recompute_lc=False))["Secondary"]
+    assert t.status == "FAIL", t.evidence
+
+
+def test_sensitivity_lost_only_at_x4_passes(tmp_path):
+    log = ("  scale 0.5 sigma = 80 ppm  FPP = 0  NFPP = 0\n"
+           "  scale 1 sigma = 160 ppm  FPP = -2.2e-16  NFPP = 0\n"
+           "  scale 2 sigma = 320 ppm  FPP = 0.0058  NFPP = 0\n"
+           "  scale 4 sigma = 640 ppm  FPP = 0.026  NFPP = 0\n")
+    t = _tests(ta.run_audit(_make_folder(str(tmp_path), log_extra=log),
+                            recompute_lc=False))["Sensitivity"]
+    assert t.status == "PASS" and "lost only at x4" in t.evidence, t.evidence
+    assert t.evidence.index("x0.5") < t.evidence.index("x1:") < t.evidence.index("x4")
+    assert "-2.2e-16" not in t.evidence
+    log2 = log.replace("FPP = 0.0058", "FPP = 0.02")
+    t = _tests(ta.run_audit(_make_folder(str(tmp_path), log_extra=log2),
+                            recompute_lc=False))["Sensitivity"]
+    assert t.status == "WARN", t.evidence
+
+
+def test_sectors_excluded_by_the_pipeline_are_left_out(tmp_path):
+    # a sector the pipeline auto-excluded (scattered light) must not enter
+    # the audit's fold or sector depths (TIC 229701403: s59 at -300000 ppm)
+    log = ("  auto-excluded 1 sector(s) after first detrend:\n"
+           "    sector 39: robust RMS = 73.28% > 2.00%\n")
+    folder = _make_folder(str(tmp_path), log_extra=log)
+    rng = np.random.default_rng(5)
+    t = np.arange(2200.0, 2225.0, 2 / 1440)
+    f = 1 + 0.7 * rng.standard_normal(t.size)
+    np.savetxt(os.path.join(folder, f"lc_corrected_{TIC}_s39.txt"),
+               np.c_[t, np.abs(f), np.full(t.size, 6e-4)])
+    A = ta.run_audit(folder)
+    t_ = _tests(A)["Recomputation: sectors"]
+    assert t_.status == "PASS" and "39" in t_.evidence and "sector 39 (" not in t_.evidence, t_.evidence
+    assert A.recomputations["excluded_sectors"] == [39]
+
+
+def test_masked_ephemeris_is_parsed():
+    class R:
+        log_lines = ["--- Transits of other known planets masked (+-0.75 T14) ---",
+                     "  P = 829.123932 d, T0 = 1857.42787, T14 = 12.00 h",
+                     "  sector  20: 36 cadences removed", "", "--- Apertures ---"]
+    assert ta._masked_ephemerides(R) == [(829.123932, 1857.42787, 0.5)]
+
+
+def _mb_summary(ratio, e_ratio, plus_bands=("g", "z"), snr=12.0):
+    rows = [dict(ID=TIC, scenario="TP", prob=0.6, M_s=1.0, flux_ratio_comp_T=0.0, M_comp=0.0),
+            dict(ID=TIC, scenario="SEBx2P", prob=0.3, M_s=0.35, M_comp=1.0,
+                 flux_ratio_comp_T=0.012),
+            dict(ID=TIC, scenario="PEB", prob=0.1, M_s=1.0, M_comp=0.97,
+                 flux_ratio_comp_T=0.41)]
+    return dict(Teff=5835.0, M_star=1.0, scenario_probs=rows,
+                ground=dict(lcs={"A": dict(band="g", usable=True, detected=True, snr=snr),
+                                 "B": dict(band="z", usable=True, detected=True, snr=snr)},
+                            plus_available=bool(plus_bands), plus_bands=list(plus_bands),
+                            chromaticity={str(TIC): dict(p=0.5 if abs(ratio - 1) < 3 * e_ratio else 1e-6,
+                                                         chromatic=abs(ratio - 1) > 3 * e_ratio,
+                                                         red_over_blue=ratio,
+                                                         e_red_over_blue=e_ratio,
+                                                         blue_band="g", red_band="z")}))
+
+
+def test_multiband_achromatic_rules_out_cool_companion(tmp_path):
+    A = ta.run_audit(_make_folder(str(tmp_path), summary_extra=_mb_summary(1.0, 0.02, ())),
+                     recompute_lc=False)
+    t = _tests(A)["Multi-band"]
+    assert t.status == "PASS", t.evidence
+    assert "ruled out by the colours" in t.evidence and "SEBx2P" in t.evidence
+    assert "did NOT enter the FPP" in t.evidence          # plain triceratops
+    assert "FPP =" in t.evidence and "--tri-plus on" in t.advice
+
+
+def test_multiband_chromatic_depth_fails(tmp_path):
+    A = ta.run_audit(_make_folder(str(tmp_path), summary_extra=_mb_summary(1.6, 0.05)),
+                     recompute_lc=False)
+    t = _tests(A)["Multi-band"]
+    assert t.status == "FAIL" and "DEPENDS ON THE BAND" in t.evidence, t.evidence
+    assert "TRICERATOPS+ used 2" in t.evidence
+
+
+def test_multiband_without_ground_data_is_na(tmp_path):
+    t = _tests(ta.run_audit(_make_folder(str(tmp_path)), recompute_lc=False))["Multi-band"]
+    assert t.status == "NA" and "g' and z'" in t.advice

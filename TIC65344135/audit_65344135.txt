@@ -1,0 +1,111 @@
+AUDIT of TIC 65344135  (triceratops_audit.py v0.1; pipeline v4.3)
+folder: /mnt/d/EXPLORE/candidates_dymock/TIC65344135
+pipeline verdict (unchanged): NOT passed
+audit: no FAIL, 4 WARN: the claim survives, with the risks listed
+
+EVALUATION - what the run claims
+  triceratops version                        1.0.17   [reference; triceratops_output_TIC65344135.txt:244]
+  pipeline version                           4.3   [reference; summary_65344135.json:script_version]
+  TRICERATOPS+                               True   [reference; summary_65344135.json:triceratops_plus]
+  input ephemeris P, T0, T14, depth          36.88 d, 4352.3681 BTJD, 5.33 h, 3200 ppm   [reference; triceratops_output_TIC65344135.txt:38]
+  adopted ephemeris P, T0                    36.878692 d, 4352.37263 BTJD   [fitted; triceratops_output_TIC65344135.txt:155]
+  sectors (aperture px, target fraction g)   3 (15 px, 0.557), 4 (11 px, 0.562), 30 (16 px, 0.556), 97 (14 px, 0.559), 106 (11 px, 0.561), 107 (11 px, 0.557), 108 (10 px, 0.556)   [measured; triceratops_output_TIC65344135.txt:30]
+  transits in the per-transit table          7   [measured; per_transit_depths_65344135.txt]
+  depth adopted (aperture)                   2.82e+03 ppm   [fitted; summary_65344135.json:depth_ppm_adopted]
+  depth on the target                        5.32e+03 ppm   [derived; summary_65344135.json:depth_on_target_ppm]
+  depth chi2/dof                             1.88   [derived; summary_65344135.json:depth_chi2_red]
+  odd/even difference                        0.941 sigma   [derived; summary_65344135.json:odd_even_sigma]
+  LD fit Rp/R*, b, grazing, T14              0.0504, 4.26e-10, False, 5.51 h   [fitted; summary_65344135.json:ld_fit]
+  stellar density transit / TIC              2.153 / 1.419 g/cm3   [fitted vs reference; triceratops_output_TIC65344135.txt:176]
+  secondary eclipse                          none; 3-sigma limit 450 ppm   [derived; summary_65344135.json:secondary]
+  ETV O-C rms, LTTE limit                    9.56 min, 32.3 min   [derived; summary_65344135.json:etv]
+  difference-imaging sectors                 6   [measured; difference_imaging_65344135.csv]
+  neighbours that can host the signal        TIC 65344134 (5.864", f 0.441151)   [derived; triceratops_output_TIC65344135.txt:307]
+  FPP                                        0.3729   [fitted; summary_65344135.json:FPP]
+  NFPP                                       0.3527   [fitted; summary_65344135.json:NFPP]
+  pipeline verdict                           NOT passed   [derived; summary_65344135.json:verdict]
+
+SKEPTIC - tests that try to break the claim
+  WARN  Ephemeris                input ephemeris missed the transits by up to 1.98 h (0.37 T14); refined from 6 transits
+                                 source: triceratops_output_TIC65344135.txt:49
+                                 -> report the refined ephemeris to the observers
+  WARN  Single events            weak transit(s) S/N < 3 at epoch [-2]
+                                 source: per_transit_depths_65344135.txt
+                                 -> re-run with that sector excluded and compare
+  WARN  Neighbours               NFPP = 0.353; possible hosts: TIC 65344134 (5.864", flux ratio 0.441151)
+                                 source: triceratops_output_TIC65344135.txt:307
+                                 -> ground photometry with a separate aperture on each named star clears it
+  WARN  Recomputation: BLS       own detrending (running median 28 h, transits not masked): best peak with data in >= 6 of the 7 transit windows at P = 36.76227 d (0.316 % from 36.87869: the two ephemerides drift apart by up to 215.0 h = 39.00 T14 over the data; 38 stronger alias(es) with data in fewer windows skipped, top peak 36.77095 d), box depth 4020 ppm; box S/N at the pipeline ephemeris 23.2, at 300 random phases max 21.0 (p = 0.00332); BLS power at P is 58 % of the peak
+                                 source: lc_corrected_65344135_s*.txt
+                                 -> period ambiguity in the TESS data: at epoch 0 (BTJD 4352.37) the two ephemerides predict transit times 8.6 h apart - a ground transit at the predicted time settles it
+  NA    Sensitivity              run without --sensitivity
+                                 source: triceratops_output_TIC65344135.txt
+  NA    Ground data              no ground light curves
+                                 source: ground_clearance_65344135.csv
+  PASS  Environment              TRICERATOPS completed 20/20 valid runs
+                                 source: triceratops_output_TIC65344135.txt:335
+  PASS  Depth consistency        chi2/dof = 1.88
+                                 source: summary_65344135.json:depth_chi2_red
+  PASS  Odd/even                 0.94 sigma
+                                 source: summary_65344135.json:odd_even_sigma
+  PASS  Secondary                none; 3-sigma limit 450 ppm, companion < 3562 K
+                                 source: summary_65344135.json:secondary
+  PASS  Shape                    not grazing; stellar density 2.153 at b = 0.00 vs 1.419 g/cm3, but b is unconstrained and b = 0.52 gives the catalogue density
+                                 source: triceratops_output_TIC65344135.txt:176
+  PASS  Dilution                 g = 0.556 to 0.561; PSF models differ by 0.001
+                                 source: triceratops_output_TIC65344135.txt:230
+  PASS  Centroids                median offset 0.8 sigma over 5 sectors (offset_direct_sigma)
+                                 source: difference_imaging_65344135.csv
+  PASS  Monte Carlo              20/20 valid runs; dominance 0.08; bootstrap error 0.01620
+                                 source: summary_65344135.json:n_valid,dominance
+  PASS  Provenance               input depth 3200 ppm (reference) replaced by the measured 2820 ppm
+                                 source: triceratops_output_TIC65344135.txt:182
+  PASS  Recomputation: sectors   6 sectors, mean box depth 2792 ppm, chi2/dof 1.92; most deviant sector 97 (3315 +/- 267 ppm)
+                                 source: lc_corrected_65344135_s*.txt
+
+NEXT OBSERVATIONS - what each kind of follow-up can remove
+  FPP = 0.3729, NFPP = 0.3527 now (criteria: FPP < 0.015, NFPP < 0.001)
+  1. Ground photometry, separate apertures on the target and each nearby star
+     addresses NEB (TIC 65344134), NEBx2P (TIC 65344134), NTP (TIC 65344134): P = 0.3527 of the total
+     if all of these are ruled out: FPP = 0.0312, NFPP = 0.0000 -> not enough by itself
+       - TIC 65344134: 5.9" , Tmag 12.56, P(signal on it) = 0.353, it would have to dim by 6393 ppm
+     how: one transit, seeing <= 3"; the star that shows the dip is the host (on the target: 5055 ppm); feed the light curves back with --ground-lc
+  2. High-resolution imaging (speckle / adaptive optics)
+     addresses BEB, BEBx2P, BTP, DEB, DEBx2P, PEB, PEBx2P, SEB, SEBx2P, STP: P = 0.0202 of the total
+     if all of these are ruled out: FPP = 0.3599, NFPP = 0.3599 -> not enough by itself
+     typical outcome: FPP = 0.3659, NFPP = 0.3566
+       - PEB: best-fit companion 0.93 Msun, 46 % of the TESS light (contrast ~0.2 mag)
+       - PEBx2P: best-fit companion 0.15 Msun, 0 % of the TESS light (contrast ~6.6 mag)
+       - STP: best-fit companion 0.92 Msun, 45 % of the TESS light (contrast ~0.2 mag)
+       - SEB: best-fit companion 0.80 Msun, 32 % of the TESS light (contrast ~0.8 mag)
+       - SEBx2P: best-fit companion 0.55 Msun, 5 % of the TESS light (contrast ~3.1 mag)
+       - typically 53 % of bound companions lie outside 0.1" (separation distribution of Raghavan et al. 2010); background stars: ~95 %
+     how: rules out companions and background stars outside ~0.1" = 37 au at 373 pc down to its contrast limit; closer companions remain - best case shown; give the contrast curve to the pipeline with --contrast-curve
+  3. Transits in two or more filters (g' and z', simultaneous if possible)
+     addresses BEB, BEBx2P, BTP, DEB, DEBx2P, PEB, PEBx2P, SEB, SEBx2P, STP: P = 0.0202 of the total
+     if all of these are ruled out: FPP = 0.3599, NFPP = 0.3599 -> not enough by itself
+     typical outcome: FPP = 0.3643, NFPP = 0.3575
+       - PEB (P = 0.0000): 0 % of the companions bright enough to make the dip change the depth by > 20 % between g' and z'; example (best-fit companion of the last run, ~5532 K): depth(g') / depth(z') = 1.00
+       - PEBx2P (P = 0.0000): 0 % of the companions bright enough to make the dip change the depth by > 20 % between g' and z'; example (best-fit companion of the last run, ~1831 K): depth(g') / depth(z') = 1.00
+       - STP (P = 0.0169): 66 % of the companions bright enough to make the dip change the depth by > 20 % between g' and z'; example (best-fit companion of the last run, ~5507 K): depth(g') / depth(z') = 0.99
+       - SEB (P = 0.0028): 73 % of the companions bright enough to make the dip change the depth by > 20 % between g' and z'; example (best-fit companion of the last run, ~5060 K): depth(g') / depth(z') = 0.85, ~854 ppm apart -> needs a depth error of <= 285 ppm per band for 3 sigma
+       - SEBx2P (P = 0.0000): 73 % of the companions bright enough to make the dip change the depth by > 20 % between g' and z'; example (best-fit companion of the last run, ~4021 K): depth(g') / depth(z') = 0.41, ~4455 ppm apart -> needs a depth error of <= 1485 ppm per band for 3 sigma
+       - background / foreground stars: colour unknown, counted as 50 %
+     how: a planet on the target gives the same depth in every band (apart from limb darkening, a few %); a companion of another colour changes it.  Typical = the share of possible companions with a colour difference large enough to see; feed the light curves to TRICERATOPS+ (--ground-lc with band)
+  4. Reconnaissance spectroscopy (RV to ~1 km/s, 2-3 epochs; line profile / SB2)
+     addresses EB, EBx2P, PEB, SEB, STP: P = 0.0197 of the total
+     if all of these are ruled out: FPP = 0.3603, NFPP = 0.3598 -> not enough by itself
+     typical outcome: FPP = 0.3641, NFPP = 0.3576
+       - EB: best-fit companion 0.12 Msun -> K ~ 7.2 km/s
+       - EBx2P: best-fit companion 0.96 Msun -> K ~ 31.5 km/s
+       - PEB: companion with 46 % of the light - a second set of lines (SB2) unless the two velocities coincide
+       - STP: companion with 45 % of the light - a second set of lines (SB2) unless the two velocities coincide
+       - SEB: companion with 32 % of the light - a second set of lines (SB2) unless the two velocities coincide
+     how: a stellar-mass companion on the target gives K of km/s (a planet m/s); a bright companion shows its own lines, also closer than imaging can resolve
+  Shortest combination (typical outcomes): ground + spectroscopy -> FPP = 0.0101, NFPP = 0.0000
+  (from the run: pooled scenario probabilities)
+  From the audit's own tests:
+    - Ephemeris: report the refined ephemeris to the observers
+    - Single events: re-run with that sector excluded and compare
+    - Neighbours: ground photometry with a separate aperture on each named star clears it
+    - Recomputation: BLS: period ambiguity in the TESS data: at epoch 0 (BTJD 4352.37) the two ephemerides predict transit times 8.6 h apart - a ground transit at the predicted time settles it

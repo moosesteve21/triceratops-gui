@@ -113,6 +113,19 @@ Notes
   limb darkening, TRICERATOPS with mission="Kepler" (4" pixels).  The TIC
   number is looked up from the KIC when --tic is not given; the default
   output folder is KIC<kic>/.
+* v4.3: fixes from the independent test runs of Steve Price (KESTREL,
+  branch kestrel-fixes: ephemeris adoption gated by its covariance, ETV
+  significances, absent parity -> 2P, --mask-ephemeris, run options in the
+  log, UTF-8, MAST time-outs, --prefetch-only and triceratops_batch.py) plus
+  his open issues 5-7: the verdict is "NOT passed" when the pipeline's own
+  tests show an EB or a wrong period (--no-eb-veto to switch off); the
+  LD-fit depth is not adopted when b is unconstrained or it disagrees with
+  the per-transit depth; triceratops' Gaia background file is written to
+  the output folder.  Next observations: from the pooled scenario
+  probabilities, what ground photometry of the neighbours, high-resolution
+  imaging, reconnaissance spectroscopy and multi-band transits can each
+  remove from FPP / NFPP (triceratops_recommend.py; log, summary and
+  recommendations_<TIC>.txt; --hires-iwa).
 * Known ephemeris for a specific target: --ephemeris P T0 DEPTH_PPM T14_H
   (Config holds one global default, which is easily the wrong object).
 * triceratops.calc_depths(tdepth=...) takes a *fractional* depth
@@ -126,6 +139,7 @@ Author: rewritten version of triceratops_script.py
 from __future__ import annotations
 
 import os
+import sys
 import inspect
 import warnings
 import argparse
@@ -170,6 +184,64 @@ if not hasattr(_sci_int, "trapz") and hasattr(_sci_int, "trapezoid"):
 import triceratops.triceratops as tr
 
 
+# Network.  MAST refuses requests or stops sending now and then, more so
+# when other pipelines download at the same time.  "timeout": seconds an
+# astroquery request or download may wait for data (set_network_timeout);
+# "retries": attempts for MAST queries and TESScut downloads; "wait": the
+# pause after the first failure, growing linearly (30, 60, 90 s ...).
+NET = {"timeout": 300.0, "retries": 4, "wait": 30.0}
+
+
+def set_network_timeout(seconds: Optional[float]) -> None:
+    """Give astroquery requests and downloads a timeout when the caller set none.
+
+    astroquery's TESScut download (used by lightkurve) and the MAST catalogue
+    requests call requests with timeout=None, so a server that accepts the
+    connection and then stops sending blocks the run indefinitely, and no
+    retry ever starts.  With a timeout the stall becomes an exception that
+    the retries handle.  None or 0 leaves astroquery unchanged.
+    """
+    import functools
+    import inspect as _inspect
+    from astroquery.query import BaseQuery
+    NET["timeout"] = float(seconds) if seconds else None
+    for name in ("_request", "_download_file"):
+        orig = getattr(BaseQuery, name)
+        orig = getattr(orig, "_tv_original", orig)
+        if not seconds:
+            setattr(BaseQuery, name, orig)
+            continue
+        sig = _inspect.signature(orig)
+
+        def wrapper(self, *args, _orig=orig, _sig=sig, **kwargs):
+            bound = _sig.bind_partial(self, *args, **kwargs)
+            unset = ("timeout" not in bound.arguments
+                     or ("timeout" in kwargs and kwargs["timeout"] is None))
+            if unset and NET["timeout"]:
+                kwargs["timeout"] = NET["timeout"]
+            return _orig(self, *args, **kwargs)
+
+        functools.update_wrapper(wrapper, orig)
+        wrapper._tv_original = orig
+        setattr(BaseQuery, name, wrapper)
+
+
+def _net_retry(fn, *args, what: str = "MAST query", **kwargs):
+    """fn(*args, **kwargs), retried with growing pauses when it raises."""
+    import time as _time
+    n = max(int(NET["retries"] or 1), 1)
+    for attempt in range(1, n + 1):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as exc:
+            if attempt == n:
+                raise
+            wait = NET["wait"] * attempt
+            print(f"  ! {what} failed ({str(exc)[:100]}); attempt {attempt + 1}/{n} "
+                  f"in {wait:.0f} s")
+            _time.sleep(wait)
+
+
 def _patch_triceratops_compat():
     """Fix triceratops' Gauss2D for NumPy 2 in versions that lack the fix.
 
@@ -195,7 +267,7 @@ def _patch_triceratops_compat():
 
 _patch_triceratops_compat()
 
-__version__ = "4.2"
+__version__ = "4.3"
 
 # Mission and time system (set by set_mission()): TESS times are BTJD
 # (BJD_TDB - 2457000), Kepler times BKJD (BJD_TDB - 2454833).
@@ -489,9 +561,37 @@ class Config:
     # 8.0 still blocks gross TTVs / false alarms while allowing modest scatter.
     refine_from_transits: bool = True
     refine_chi2_max: float = 8.0
+    # A refined ephemeris is adopted only if it predicts the mid-time of every
+    # epoch with data to within this fraction of T14 (1 sigma).  A fit to a
+    # cluster of transits (e.g. two adjacent sectors) is otherwise
+    # extrapolated over the whole baseline.
+    ephem_adopt_max_sigma: float = 0.25
+    # Transits closer than this [d] to a data-segment edge are flagged and the
+    # depth and odd/even tests are also reported without them.
+    edge_transit_d: float = 0.5
+    # other known planets of the system: [(P, T0, T14_days), ...]
+    mask_ephemerides: tuple = ()
     # The LD fit may overwrite the adopted depth / T14 only if its T0 shift
     # is below this fraction of T14 (a larger shift means the fold is smeared).
     ld_update_max_t0shift: float = 0.15
+    # ...and only if b is constrained (error <= this; a fit stuck at b ~ 0
+    # counts as unconstrained) and the LD depth is within ld_depth_max_sigma
+    # of the per-transit depth (Steve Price, KESTREL comparison, issue 6)
+    ld_b_unconstrained_err: float = 0.3
+    ld_depth_max_sigma: float = 3.0
+    # The verdict is "NOT passed" when the pipeline's own tests show an
+    # eclipsing binary or a wrong period (secondary eclipse, odd/even FAIL,
+    # absent parity) even if FPP/NFPP meet the criteria (issue 5)
+    eb_veto: bool = True
+    eb_veto_odd_even_sigma: float = 3.0
+    # a detected secondary counts as planetary occultation (no veto) when its
+    # brightness temperature is below this and its depth below this
+    # fraction of the primary depth
+    eb_veto_planet_tmax: float = 4000.0
+    eb_veto_planet_depth_ratio: float = 0.1
+    # inner working angle assumed for high-resolution imaging in the
+    # observation recommendations [arcsec]
+    hires_iwa: float = 0.1
     # triceratops.remove_star drops rows of target.stars but NOT the matching
     # rows of target.pix_coords.  A calc_depths() call after remove_star then
     # pairs every remaining star with the pixel position of another star
@@ -507,6 +607,17 @@ class Config:
     fold_n_dur: float = 5.0           # phase window, in transit durations
     contrast_curve_file: Optional[str] = None
     contrast_filt: str = "TESS"
+    # MOLUSC output (Wood et al. 2021): bound companions that Gaia (RUWE,
+    # RV scatter) and imaging still allow; replaces TRICERATOPS' default
+    # companion prior for the P*/S* scenarios
+    molusc_file: Optional[str] = None
+    molusc_n: Optional[int] = None          # companions MOLUSC generated
+    molusc_multiplicity: float = 1.0        # fraction of stars with a companion
+    _molusc_tri: Optional[str] = None       # resampled file passed to calc_probs
+    # LD fit: a stellar density this far (factor) from the catalogue value
+    # triggers a refit with a log-normal density prior of this width
+    ld_rho_ratio_max: float = 3.0
+    ld_rho_prior_dex: float = 0.3
     parallel: bool = True
     search_radius: int = 10
 
@@ -628,8 +739,9 @@ class Config:
     # T14/20/n_epochs in P, so a run of ~100 x 100 points takes seconds.
     ephem_grid_dP: Optional[float] = None
     ephem_grid_min_snr: float = 7.0
-    # MAST TESScut downloads fail now and then (502 / "Request failed").
-    tesscut_retries: int = 3
+    # MAST TESScut downloads fail now and then (502 / "Request failed", or
+    # a stalled connection once --net-timeout turns it into an error).
+    tesscut_retries: int = 4
 
     def __post_init__(self) -> None:
         # Default output directory is TIC{tic}/ so every target lands in its
@@ -702,9 +814,9 @@ def field_catalog(tic: int, ra: float, dec: float, cfg: "Config", log=None):
         except Exception:
             pass
     try:
-        tab = Catalogs.query_region(SkyCoord(ra, dec, unit="deg"),
-                                    radius=cfg.field_radius_arcsec * u.arcsec,
-                                    catalog="TIC")
+        tab = _net_retry(Catalogs.query_region, SkyCoord(ra, dec, unit="deg"),
+                         radius=cfg.field_radius_arcsec * u.arcsec,
+                         catalog="TIC", what="field catalogue query")
     except Exception as exc:
         _log(log, f"  ! field catalogue query failed ({exc}); "
                   f"no PSF model of the field")
@@ -831,7 +943,7 @@ def apply_dilution_correction(sd: "SectorData", cfg: "Config") -> None:
 # --------------------------------------------------------------------------
 def stellar_params(tic: int, kic: Optional[int] = None) -> dict:
     """Query the TIC by *column name* rather than by positional index."""
-    tab = Catalogs.query_criteria(catalog="Tic", ID=tic)
+    tab = _net_retry(Catalogs.query_criteria, catalog="Tic", ID=tic, what="TIC query")
     if len(tab) == 0:
         raise ValueError(f"TIC {tic} not found")
     row = tab[0]
@@ -1090,11 +1202,14 @@ def apply_star_overrides(star: dict, cfg, tic: int, log=None) -> dict:
     return star
 
 
-def find_tess_sectors(tic: int, cfg: Optional[Config] = None) -> np.ndarray:
+def find_tess_sectors(tic: int, cfg: Optional[Config] = None,
+                      use_cache: bool = True) -> np.ndarray:
     """Sectors with photometry for this TIC (FFI cutouts or SPOC LC).
 
     When ``cfg.lc_source`` is ``sap`` / ``pdcsap``, returns sectors that have
-    a SPOC light curve. Otherwise returns TESScut FFI coverage.
+    a SPOC light curve. Otherwise returns TESScut FFI coverage; if MAST
+    cannot be reached, the sectors already in the cache (unless
+    ``use_cache`` is False: then the search is retried and must succeed).
     """
     if is_kepler():
         return _find_kepler_quarters(cfg)
@@ -1102,7 +1217,7 @@ def find_tess_sectors(tic: int, cfg: Optional[Config] = None) -> np.ndarray:
     if src in ("sap", "pdcsap"):
         return _find_spoc_lc_sectors(tic, cfg)
 
-    if cfg is not None:
+    if cfg is not None and use_cache:
         found = set()
         for cache in _tesscut_cache_dirs(cfg):
             for sec, paths in _build_tesscut_index(cache).items():
@@ -1112,7 +1227,9 @@ def find_tess_sectors(tic: int, cfg: Optional[Config] = None) -> np.ndarray:
     else:
         found = set()
     try:
-        search = lk.search_tesscut(f"TIC {tic}")
+        # with cutouts already cached, fail fast and use them (below)
+        search = (lk.search_tesscut(f"TIC {tic}") if found else
+                  _net_retry(lk.search_tesscut, f"TIC {tic}", what="TESScut sector search"))
         if len(search) == 0:
             raise RuntimeError(f"No TESScut data for TIC {tic}")
         return np.array(sorted({int(s) for s in search.table["sequence_number"]}))
@@ -1383,7 +1500,8 @@ def _tesscut_target_coord(tic, cfg):
     """Memoize coordinates; main() normally already obtained them from TIC."""
     known = getattr(cfg, "_tesscut_coords", None)
     if known is None or known[0] != int(tic):
-        tab = Catalogs.query_criteria(catalog="Tic", ID=tic)
+        tab = _net_retry(Catalogs.query_criteria, catalog="Tic", ID=tic,
+                         what="TIC coordinate query")
         if len(tab) == 0:
             raise ValueError(f"TIC {tic} not found")
         coord = SkyCoord(float(tab[0]["ra"]), float(tab[0]["dec"]), unit="deg")
@@ -1459,12 +1577,71 @@ def _load_tesscut_tpf(tic: int, sector: int, cutout_size: int, cfg: Config,
             last_exc = exc
             if "No TESScut product" in str(exc) or attempt == n_try:
                 break
-            wait = 15 * attempt
+            wait = NET["wait"] * attempt
             print(f"    download attempt {attempt}/{n_try} failed "
                   f"({str(exc)[:80]}); retrying in {wait} s")
             _time.sleep(wait)
     _invalidate_tesscut_index(cache)
     raise last_exc
+
+
+def prefetch_cutout_sizes(cfg: Config) -> list:
+    """Square TESScut sizes [px] a run with these settings requests per sector.
+
+    The photometry cutout (cfg.cutout_size), TRICERATOPS' own cutout
+    (N_pix = 2 * search_radius + 2 in triceratops.target) and, with
+    --vet-neighbours, the larger neighbour-vetting cutout.
+    """
+    sizes = {int(cfg.cutout_size), 2 * int(cfg.search_radius) + 2}
+    if cfg.vet_neighbours:
+        sizes.add(int(max(cfg.cutout_size, 2 * cfg.neighbour_max_sep / 21.0 + 4)))
+    return sorted(sizes)
+
+
+def prefetch_tesscut(cfg: Config) -> dict:
+    """Download every TESScut cutout a run with these settings would read; no analysis.
+
+    Fills cfg.cache_dir() (--download-dir) so that a later run with the same
+    target, sectors and options finds every cutout in the cache.  Catalogue
+    queries (TIC, Gaia, TRILEGAL) are not cached and still run at analysis
+    time.  Writes prefetch_TIC<tic>.json to the output folder and returns
+    the same record.
+    """
+    tic = cfg.tic
+    src = (getattr(cfg, "lc_source", "tesscut") or "tesscut").lower()
+    if is_kepler() or src != "tesscut":
+        raise SystemExit("--prefetch-only supports TESS runs with --lc-source "
+                         "tesscut only")
+    print(f"Prefetching TESScut cutouts for TIC {tic} into {cfg.cache_dir()}")
+    sectors = [int(s) for s in find_tess_sectors(tic, cfg=cfg, use_cache=False)]
+    excl = {int(s) for s in (cfg.exclude_sectors or [])}
+    if excl:
+        print(f"  excluding sectors {sorted(excl & set(sectors))}")
+    sectors = [s for s in sectors if s not in excl]
+    sizes = prefetch_cutout_sizes(cfg)
+    print(f"  sectors {sectors}; cutout sizes {sizes} px")
+    rec = dict(tic=int(tic), cache_dir=cfg.cache_dir(), sectors=sectors,
+               sizes=sizes, cached=0, downloaded=0, failed=[])
+    for s in sectors:
+        for size in sizes:
+            hit = any(_find_cached_tesscut(root, s, size, tic=tic, cfg=cfg)
+                      for root in _tesscut_cache_dirs(cfg))
+            if hit:
+                rec["cached"] += 1
+                print(f"  sector {s:3d} size {size:2d}: already cached")
+                continue
+            try:
+                _load_tesscut_tpf(tic, s, size, cfg)
+                rec["downloaded"] += 1
+            except Exception as exc:
+                rec["failed"].append(dict(sector=s, size=size, error=str(exc)[:200]))
+                print(f"  ! sector {s} size {size}: {exc}")
+    print(f"  {rec['cached']} already cached, {rec['downloaded']} downloaded, "
+          f"{len(rec['failed'])} failed")
+    import json
+    with open(cfg.path(f"prefetch_TIC{tic}.json"), "w", encoding="utf-8") as fh:
+        json.dump(rec, fh, indent=2)
+    return rec
 
 
 @contextmanager
@@ -2308,6 +2485,42 @@ def segment_edge_distance(time, gap: float = 0.5):
     return out
 
 
+def transit_edge_distance(time, tcs, gap: float = 0.5):
+    """Distance [d] of each mid-time to the nearest edge of the data segment
+    that contains it (a segment ends at any gap longer than *gap* days);
+    0 for a mid-time outside the data."""
+    t = np.asarray(time, float)
+    ts = np.sort(t[np.isfinite(t)])
+    if ts.size == 0:
+        return np.zeros(len(tcs))
+    br = np.where(np.diff(ts) > gap)[0]
+    starts = ts[np.concatenate([[0], br + 1])]
+    ends = ts[np.concatenate([br, [ts.size - 1]])]
+    out = []
+    for tc in np.asarray(tcs, float):
+        k = int(np.searchsorted(starts, tc, side="right")) - 1
+        out.append(0.0 if k < 0 or tc > ends[k]
+                   else float(min(tc - starts[k], ends[k] - tc)))
+    return np.array(out)
+
+
+def mask_other_transits(sd: "SectorData", ephemerides, half_width: float = 0.75) -> int:
+    """Drop the cadences within half_width x T14 of the transits of other
+    known planets [(P, T0, T14_days), ...]; returns the number dropped."""
+    t = np.asarray(sd.time, float)
+    keep = np.ones(t.size, bool)
+    for P, T0, dur in ephemerides:
+        ph = (t - T0 + 0.5 * P) % P - 0.5 * P
+        keep &= np.abs(ph) >= half_width * dur
+    n = int((~keep).sum())
+    if n:
+        for name in ("time", "flux", "flux_err", "cen_x", "cen_y"):
+            a = getattr(sd, name)
+            if a is not None and np.size(a) == keep.size:
+                setattr(sd, name, np.asarray(a)[keep])
+    return n
+
+
 def candidate_edge_fraction(time, P, T0, dur, within: float = 0.5,
                             gap: float = 0.5):
     """Fraction of the in-transit cadences of a candidate that lie within
@@ -2503,48 +2716,92 @@ def estimate_duration_depth(time, flux, flux_err, P, T0, dur_guess=None):
     return t14_fit, depth_fit
 
 
-def refine_ephemeris(time, flux, flux_err, P, T0, dur):
+def _box_snr(time, flux, P, T0, d):
+    """Box depth and S/N of a transit of duration d at (P, T0): depth over
+    the scatter of the nearby out-of-transit flux / sqrt(n_in)."""
+    phase = (time - T0 + 0.5 * P) % P - 0.5 * P
+    ins = np.abs(phase) < 0.5 * d
+    outs = (np.abs(phase) > 0.75 * d) & (np.abs(phase) < 2.0 * d)
+    if ins.sum() < 5 or outs.sum() < 10:
+        return 0.0, -np.inf
+    f_out = np.median(flux[outs])
+    depth = f_out - np.mean(flux[ins])
+    sig = 1.4826 * np.median(np.abs(flux[outs] - f_out))
+    if not (sig > 0):
+        return depth, -np.inf
+    return depth, depth / (sig / np.sqrt(ins.sum()))
+
+
+def refine_ephemeris(time, flux, flux_err, P, T0, dur, extra_durs=()):
     """Fine-tune P and T0; fit depth+T14 with a trapezoid (not TLS).
+
+    v4.3: the box duration is chosen first.  Trial durations around the TLS
+    value (and the extra candidates, e.g. the physical T14 and the data
+    estimate) are scanned in T0 at fixed P and the one with the highest box
+    S/N wins.  Before, the generous transit-MASK duration (5 x the TLS T14)
+    was used as the box: for a correct TLS T14 that box is five times too
+    wide, every position containing the transit scores the same, and T0 and
+    the trapezoid wandered (WASP-18b: T0 off by 4 h, T14 = 9 h, 100 ppm).
 
     Returns (P, T0, T14, depth).
     """
     P, T0, dur = float(P), float(T0), float(dur)
+    time = np.asarray(time, float)
+    flux = np.asarray(flux, float)
+    cands = [dur * k for k in (0.5, 0.7, 1.0, 1.4)]
+    for d in extra_durs or ():
+        try:
+            d = float(d)
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(d) and d > 0:
+            cands += [0.7 * d, d, 1.3 * d]
+    cands = sorted({round(d, 6) for d in cands
+                    if 0.01 <= d <= 0.35 * P})
+    if not cands:
+        cands = [min(max(dur, 0.02), 0.35 * P)]
+    span = max(cands)
+    T0_scan = np.linspace(T0 - span, T0 + span, 121)
+    best_d, best_t0, best_s = cands[0], T0, -np.inf
+    for d in cands:
+        for t0 in T0_scan:
+            _, sn = _box_snr(time, flux, P, t0, d)
+            if sn > best_s:
+                best_s, best_d, best_t0 = sn, d, t0
+    if abs(best_d - dur) / dur > 0.05 or abs(best_t0 - T0) > 1e-4:
+        print(f"  box duration {best_d * 24:.2f} h (TLS {dur * 24:.2f} h), "
+              f"T0 {T0:.5f} -> {best_t0:.5f}, box S/N {best_s:.1f}")
+    dur, T0 = best_d, best_t0
 
     baseline = float(time.max() - time.min())
-    dP = max(3.0 * max(dur, 0.05) * P / max(baseline, P), 1e-6)
-    dT0 = max(0.5 * max(dur, 0.05), 0.01)
+    dP = max(3.0 * max(dur, 0.02) * P / max(baseline, P), 1e-6)
+    dT0 = max(0.25 * dur, 0.005)
     P_grid = np.linspace(P - dP, P + dP, 41)
     T0_grid = np.linspace(T0 - dT0, T0 + dT0, 41)
-    half = 0.5 * max(dur, 0.05)
-
-    def score(p, t0):
-        phase = (time - t0 + 0.5 * p) % p - 0.5 * p
-        ins = np.abs(phase) < half
-        outs = (np.abs(phase) > 1.5 * half) & (np.abs(phase) < 4.0 * half)
-        if ins.sum() < 5 or outs.sum() < 10:
-            return -np.inf
-        w_in = 1.0 / np.clip(flux_err[ins], 1e-12, None) ** 2
-        w_out = 1.0 / np.clip(flux_err[outs], 1e-12, None) ** 2
-        mean_in = np.sum(w_in * flux[ins]) / np.sum(w_in)
-        mean_out = np.sum(w_out * flux[outs]) / np.sum(w_out)
-        var_in = np.sum(w_in * (flux[ins] - mean_in) ** 2) / np.sum(w_in)
-        return (mean_out - mean_in) / np.sqrt(max(var_in, 1e-16))
-
     best, best_sc = (P, T0), -np.inf
     for p in P_grid:
         for t0 in T0_grid:
-            sc = score(p, t0)
+            _, sc = _box_snr(time, flux, p, t0, dur)
             if sc > best_sc:
                 best_sc, best = sc, (p, t0)
     P_ref, T0_ref = best
     if abs(P_ref - P) / P > 1e-8 or abs(T0_ref - T0) > 1e-5:
         print(f"  refined ephemeris: P = {P:.6f} -> {P_ref:.6f} d, "
               f"T0 = {T0:.5f} -> {T0_ref:.5f}")
+    box_depth, _ = _box_snr(time, flux, P_ref, T0_ref, dur)
 
-    dur_start = max(dur, 0.05)
     t14_fit, depth_fit, t0s, _ = fit_transit_shape(
         time, flux, flux_err, P_ref, T0_ref,
-        dur_guess=dur_start, depth_guess=None)
+        dur_guess=dur, depth_guess=box_depth if box_depth > 0 else None)
+    ok = (np.isfinite(t14_fit) and 0.3 * dur <= t14_fit <= 2.5 * dur
+          and np.isfinite(depth_fit) and depth_fit > 0.5 * max(box_depth, 0)
+          and abs(t0s) < 0.5 * dur)
+    if not ok:
+        print(f"  ! trapezoid fit not plausible (T14 = {t14_fit * 24:.2f} h, "
+              f"depth = {depth_fit * 1e6:.0f} ppm, shift = {t0s * 1440:.0f} min); "
+              f"keeping the box: T14 = {dur * 24:.2f} h, depth = "
+              f"{box_depth * 1e6:.0f} ppm")
+        return P_ref, T0_ref, dur, box_depth
     T0_ref = T0_ref + t0s
     print(f"  trapezoid fit: T14 = {t14_fit * 24:.2f} h, "
           f"depth = {depth_fit * 1e6:.0f} ppm")
@@ -2681,7 +2938,15 @@ def _unit_shape_func(results, shape_model, time, P, T0, dur, ref_depth=None):
         d_ref = 1.0 - float(results.depth)
         tm = np.asarray(results.model_lightcurve_time, float)
         fm = np.asarray(results.model_lightcurve_model, float)
-        ph_m = (tm - T0 + 0.5 * P) % P - 0.5 * P
+        # fold the TLS model on TLS's OWN ephemeris: the model was built
+        # with it, and folding it on the refined P smears and shifts the
+        # template over a long baseline (WASP-18, 2900 d: dTc +10 min,
+        # per-transit depths 13 % too shallow)
+        P_m = float(getattr(results, "period", P) or P)
+        T0_m = float(getattr(results, "T0", T0) or T0)
+        if not (np.isfinite(P_m) and np.isfinite(T0_m)):
+            P_m, T0_m = P, T0
+        ph_m = (tm - T0_m + 0.5 * P_m) % P_m - 0.5 * P_m
         near = np.abs(ph_m) < 2.0 * dur
         if d_ref > 0 and near.sum() >= 10:
             order = np.argsort(ph_m[near])
@@ -2838,14 +3103,37 @@ def per_transit_depths(time, flux, flux_err, results, cfg: Config,
     return dt
 
 
-def refine_ephemeris_from_transits(dt, P, T0, dur, cfg: Config):
+def _ephem_pred_sigma(cov, epochs):
+    """1-sigma uncertainty [d] of T0 + E * P at each epoch E, from the 2x2
+    covariance of (T0, P) with T0 at epoch 0."""
+    c = np.asarray(cov, float)
+    E = np.asarray(epochs, float)
+    return np.sqrt(np.maximum(c[0, 0] + 2.0 * E * c[0, 1] + E ** 2 * c[1, 1], 0.0))
+
+
+def _ephem_constrained(cov, epochs_data, dur, cfg: Config):
+    """(ok, worst_epoch, worst_sigma_d): does the fitted ephemeris predict
+    every epoch with data to within cfg.ephem_adopt_max_sigma x T14?"""
+    ep = np.asarray(sorted(set(int(e) for e in epochs_data)), float)
+    if ep.size == 0:
+        return True, None, 0.0
+    sig = _ephem_pred_sigma(cov, ep)
+    k = int(np.argmax(sig))
+    return (bool(sig[k] <= cfg.ephem_adopt_max_sigma * dur),
+            int(ep[k]), float(sig[k]))
+
+
+def refine_ephemeris_from_transits(dt, P, T0, dur, cfg: Config,
+                                   epochs_data=None):
     """Linear ephemeris from the measured individual mid-times.
 
     Uses transits with snr >= per_transit_min_snr and a measured timing
     error.  Returns a dict (``updated`` tells whether the new P, T0 should
     be adopted) or None when there are too few transits.  A high chi2_red
     of the linear fit points to TTVs or false detections; the ephemeris is
-    then left alone.
+    then left alone.  So is a fit that does not predict every epoch in
+    *epochs_data* (default: the epochs of *dt*) to within
+    cfg.ephem_adopt_max_sigma x T14.
     """
     if dt is None or dt.size == 0:
         return None
@@ -2870,10 +3158,21 @@ def refine_ephemeris_from_transits(dt, P, T0, dur, cfg: Config):
                eT0=float(np.sqrt(cov[0, 0]) * scale),
                chi2_red=chi2r, oc_rms_min=float(np.std(resid) * 1440.0),
                epochs=ep.astype(int), oc=resid, e_oc=sig)
+    # cov is for (a, b) = (T0 shift, P shift), the same as (T0, P)
+    ok_c, e_w, s_w = _ephem_constrained(
+        cov * scale ** 2, dt["epoch"] if epochs_data is None else epochs_data,
+        dur, cfg)
+    out.update(worst_epoch=e_w, worst_sigma_d=s_w)
     if chi2r > cfg.refine_chi2_max:
         out.update(updated=False,
                    reason=f"linear ephemeris fits poorly (chi2_red = "
                           f"{chi2r:.1f}): possible TTVs or false detections")
+    elif not ok_c:
+        out.update(updated=False,
+                   reason=f"the fit predicts epoch {e_w} only to +-"
+                          f"{s_w * 24:.2f} h (> {cfg.ephem_adopt_max_sigma:g} "
+                          f"T14): the fitted transits do not constrain the "
+                          f"whole baseline")
     else:
         out.update(updated=True, reason="ok")
     return out
@@ -2968,7 +3267,7 @@ def fit_linear_ephemeris(rows, P, T0, dur, min_snr=5.0, tol_frac=0.15,
     cov = np.linalg.inv(A.T @ A) * max(s2, (2.0 / 1440.0) ** 2)
     rms = float(np.sqrt(np.mean(res ** 2)))
     return dict(P=float(Pn), T0=float(T0n), eP=float(np.sqrt(cov[1, 1])),
-                eT0=float(np.sqrt(cov[0, 0])), n=int(inl.sum()),
+                eT0=float(np.sqrt(cov[0, 0])), cov=cov.tolist(), n=int(inl.sum()),
                 rms_min=rms * 1440.0, ok=rms < max_rms_frac * dur,
                 epochs=[int(e) for e in ep[inl]],
                 rejected=[int(e) for e in ep[~inl]],
@@ -3192,6 +3491,7 @@ def check_known_ephemeris(time, flux, flux_err, P, T0, dur, cfg: Config,
         fit_i, _ = fit_linear_ephemeris(rows, P1, T01, dur,
                                         min_snr=cfg.ephem_scan_min_snr)
         if it == 0:
+            ep_data = [r["epoch"] for r in rows]       # epochs with data
             for r in rows:
                 _log(log, f"  epoch {r['epoch']:4d}  predicted {r['Tc_pred']:.4f}"
                           f"  found {r['Tc']:.4f}  ({(r['Tc'] - r['Tc_pred']) * 24:+6.2f} h)"
@@ -3201,6 +3501,12 @@ def check_known_ephemeris(time, flux, flux_err, P, T0, dur, cfg: Config,
         if fit_i is None:
             break
         fit = fit_i
+        # A first-pass fit that does not predict every epoch with data must
+        # not steer the narrow rescan: extrapolated far from its transits it
+        # lands on whatever noise peak is nearest, and the refit then looks
+        # well constrained.  Stop here; the check below rejects this fit.
+        if it == 0 and not _ephem_constrained(fit["cov"], ep_data, dur, cfg)[0]:
+            break
         P1, T01 = fit["P"], fit["T0"]
         R = max(0.5 * dur, 4.0 * fit["rms_min"] / 1440.0)
     if fit is None or not fit["ok"]:
@@ -3217,17 +3523,31 @@ def check_known_ephemeris(time, flux, flux_err, P, T0, dur, cfg: Config,
     T0_mid = fit["T0"] + e_mid * P_new
     ep_used = np.asarray(fit["epochs"], float)
     drift = float(np.max(np.abs((T0 + ep_used * P) - (T0_new + ep_used * P_new))))
+    ep_all = np.asarray(sorted(set(ep_data) | set(fit["epochs"])), float)
+    drift_all = float(np.max(np.abs((T0 + ep_all * P) - (T0_new + ep_all * P_new))))
     _log(log, f"  linear fit of {fit['n']} transits (epochs {fit['epochs']}"
               + (f", rejected {fit['rejected']}" if fit.get("rejected") else "")
               + f"): P = {P_new:.6f} +/- {fit['eP']:.6f} d, "
               f"T0 = {T0_new:.5f} {TIME_LABEL} (epoch 0) = {T0_mid:.5f} (epoch {e_mid}), "
               f"O-C rms = {fit['rms_min']:.1f} min")
-    if drift < 0.1 * dur:
+    if drift_all < 0.1 * dur:
         _log(log, "  known ephemeris confirmed (drift < 0.1 T14 over the "
                   "baseline); kept")
         return P, T0, fit
+    ok_c, e_w, s_w = _ephem_constrained(fit["cov"], ep_all, dur, cfg)
+    if not ok_c:
+        fit["ok"] = False
+        _log(log, f"  ! refined ephemeris NOT adopted: fitted on epochs "
+                  f"{min(fit['epochs'])}-{max(fit['epochs'])} only, it predicts "
+                  f"epoch {e_w} (with data) to +-{s_w * 24:.2f} h "
+                  f"(> {cfg.ephem_adopt_max_sigma:g} T14). It differs from the "
+                  f"known ephemeris by up to {drift * 24:.2f} h at the fitted "
+                  f"epochs and {drift_all * 24:.2f} h over all epochs with data; "
+                  f"the known ephemeris is kept")
+        return P, T0, fit
     _log(log, f"  ! the known ephemeris misses the transits by up to "
-              f"{drift * 24:.2f} h (= {drift / dur:.2f} T14); "
+              f"{drift * 24:.2f} h (= {drift / dur:.2f} T14) at the fitted "
+              f"epochs, {drift_all * 24:.2f} h over all epochs with data; "
               f"ADOPTING the refined ephemeris "
               f"(P {P:.6f} -> {P_new:.6f} d, T0 -> {T0_new:.5f}). "
               f"Use --ephem-search off to keep the input values.")
@@ -3411,14 +3731,54 @@ def report_depths_per_sector(dt, sectors_data, cfg: "Config", log=None):
             _log(log, f"  cadence {key:5.1f} min: odd {mo * 1e6:7.0f} +/- "
                       f"{eo * 1e6:5.0f} ppm ({odd.size}), even {me * 1e6:7.0f} "
                       f"+/- {ee * 1e6:5.0f} ppm ({even.size}): {zs:+.2f} sigma")
+    mp = missing_parity(diag)
+    if mp:
+        other = "even" if mp == "odd" else "odd"
+        P_now = _summary(cfg).get("P_d")
+        P2 = (f"2P = {2 * float(P_now):.6f} d" if P_now is not None
+              else "twice the period")
+        _log(log, f"  ! no transit at the {mp} epochs ({mp} depth "
+                  f"{diag[f'depth_{mp}'] * 1e6:.0f} +/- "
+                  f"{diag[f'depth_{mp}_err'] * 1e6:.0f} ppm, {other} "
+                  f"{diag[f'depth_{other}'] * 1e6:.0f} +/- "
+                  f"{diag[f'depth_{other}_err'] * 1e6:.0f} ppm): the period is "
+                  f"probably {P2}; rerun with that period")
+        _summary(cfg).update(missing_parity=mp)
     if "chi2_red" in diag and diag["chi2_red"] > 5:
         _log(log, "  ! depths inconsistent beyond their errors: residual "
                   "systematics, an imperfect PSF model of the neighbours, or "
                   "a real change of the eclipse (see the depth trend below)")
+    # transits next to a data-segment edge (orbit gaps, sector ends): the
+    # detrending is least reliable there, and with few transits a single
+    # one can decide the depth and odd/even tests
+    t_all = np.concatenate([np.asarray(sd.time, float) for sd in sectors_data
+                            if len(sd.time)])
+    d_edge = transit_edge_distance(t_all, dtc["Tc"])
+    near = d_edge < cfg.edge_transit_d
+    if near.any():
+        _log(log, f"  transits within {cfg.edge_transit_d:g} d of a data-segment "
+                  f"edge: " + ", ".join(f"epoch {int(e)} ({d * 24:.1f} h)"
+                                        for e, d in zip(dtc["epoch"][near],
+                                                        d_edge[near])))
+        if (~near).sum() >= 2:
+            dx = depth_diagnostics(dtc[~near])
+            _log(log, f"  without them ({int((~near).sum())} transits): "
+                      + (f"constant-depth chi2/dof = {dx['chi2_red']:.2f}"
+                         if "chi2_red" in dx else "")
+                      + (f", odd/even difference = {dx['odd_even_sigma']:.2f} sigma"
+                         if "odd_even_sigma" in dx else ""))
+            _summary(cfg).update(
+                edge_transit_epochs=[int(e) for e in dtc["epoch"][near]],
+                depth_chi2_red_excl_edge=float(dx.get("chi2_red", np.nan)),
+                odd_even_sigma_excl_edge=float(dx.get("odd_even_sigma", np.nan)))
     _summary(cfg).update(
         depth_on_target_ppm=float(diag.get("depth", np.nan) * 1e6),
         depth_chi2_red=float(diag.get("chi2_red", np.nan)),
         odd_even_sigma=float(diag.get("odd_even_sigma", np.nan)),
+        depth_odd_ppm=float(diag.get("depth_odd", np.nan) * 1e6),
+        depth_odd_err_ppm=float(diag.get("depth_odd_err", np.nan) * 1e6),
+        depth_even_ppm=float(diag.get("depth_even", np.nan) * 1e6),
+        depth_even_err_ppm=float(diag.get("depth_even_err", np.nan) * 1e6),
         g_target_range=[float(np.nanmin([x[5] for x in rows])),
                         float(np.nanmax([x[5] for x in rows]))])
     return out
@@ -3573,6 +3933,15 @@ def etv_analysis(dt, P, T0, cfg: "Config", tic: int, log=None):
     _log(log, f"\n--- Eclipse timing variations ({n} mid-times) ---")
     _log(log, f"  linear ephemeris: P = {out['P']:.6f} +/- {out['eP']:.6f} d; "
               f"O-C rms = {out['rms_min']:.1f} min, chi2_red = {out['chi2_red']:.2f}")
+    if out["chi2_red"] > 2.0:
+        _log(log, f"  ! the O-C scatter is {np.sqrt(out['chi2_red']):.1f} x the "
+                  f"per-transit timing errors (errors underestimated, or real "
+                  f"timing variations): every test below scales its errors by "
+                  f"the chi2_red of its own model")
+
+    def _scale(chi, k):
+        """Error inflation from a model with k parameters (>= 1)."""
+        return max(chi / max(n - k, 1), 1.0)
     # odd / even
     odd = (np.mod(E, 2) == 1)
     if odd.any() and (~odd).any():
@@ -3581,7 +3950,8 @@ def etv_analysis(dt, P, T0, cfg: "Config", tic: int, log=None):
             return np.sum(ww * r1[sel]) / np.sum(ww), 1 / np.sqrt(np.sum(ww))
         mo, eo = wm(odd)
         me, ee = wm(~odd)
-        dlt, edl = mo - me, np.hypot(eo, ee)
+        _, _, _, chi_oe = wls(np.column_stack([np.ones_like(E), E, odd.astype(float)]))
+        dlt, edl = mo - me, np.hypot(eo, ee) * np.sqrt(_scale(chi_oe, 3))
         ecosw = np.pi * dlt / (4.0 * P)            # binary at 2P: half-period offset
         eecw = np.pi * edl / (4.0 * P)
         out.update(odd_even_dt_min=float(dlt * 1440), odd_even_dt_err_min=float(edl * 1440),
@@ -3595,11 +3965,12 @@ def etv_analysis(dt, P, T0, cfg: "Config", tic: int, log=None):
         p2, c2, r2, chi2q = wls(A2)
         q, eq = p2[2], np.sqrt(c2[2, 2] * max(chi2q / max(n - 3, 1), 1))
         pdot = 2 * q / P                          # dP/dt [d/d]
+        dchi2_q = (chi1 - chi2q) / _scale(chi2q, 3)
         out.update(dPdE_d=float(2 * q), dPdE_err_d=float(2 * eq),
-                   Pdot=float(pdot), dchi2_quad=float(chi1 - chi2q))
+                   Pdot=float(pdot), dchi2_quad=float(dchi2_q))
         _log(log, f"  quadratic ephemeris: dP/dE = {2 * q * 86400:+.3f} +/- "
                   f"{2 * eq * 86400:.3f} s per cycle ({q / eq:+.1f} sigma); "
-                  f"delta chi2 vs linear = {chi1 - chi2q:.1f}")
+                  f"delta chi2 vs linear = {dchi2_q:.1f}")
     # light-travel time effect
     span = float(t.max() - t.min())
     if n >= 6 and span > 0:
@@ -3620,14 +3991,15 @@ def etv_analysis(dt, P, T0, cfg: "Config", tic: int, log=None):
         inside = lims[:, 0] <= span
         lim_in = float(np.median(lims[inside, 1])) if inside.any() else np.nan
         c_au_per_day = 173.1446
+        dchi2_l = (chi1 - best[1]) / _scale(best[1], 4)
         out.update(ltte_best_P=float(best[0]), ltte_best_K_min=float(best[2] * 1440),
-                   ltte_dchi2=float(chi1 - best[1]),
+                   ltte_dchi2=float(dchi2_l),
                    ltte_lim3_min=float(lim_in * 1440),
                    ltte_lim3_au=float(lim_in * c_au_per_day))
         _log(log, f"  light-travel-time search (outer period {3 * P:.0f}-"
                   f"{3 * span:.0f} d): best P_out = {best[0]:.0f} d, amplitude "
                   f"{best[2] * 1440:.1f} +/- {best[3] * 1440:.1f} min, delta chi2 = "
-                  f"{chi1 - best[1]:.1f} (4 extra parameters: not significant "
+                  f"{dchi2_l:.1f} (4 extra parameters: not significant "
                   f"below ~15)")
         if np.isfinite(lim_in):
             _log(log, f"  3-sigma limit on an LTTE amplitude for P_out <= "
@@ -3732,10 +4104,33 @@ def depth_diagnostics(dt: np.ndarray) -> dict:
     if odd.sum() >= 1 and even.sum() >= 1:
         d_odd = float(np.sum(w[odd] * d[odd]) / np.sum(w[odd]))
         d_even = float(np.sum(w[even] * d[even]) / np.sum(w[even]))
-        sig = float(np.sqrt(1.0 / np.sum(w[odd]) + 1.0 / np.sum(w[even])))
+        e_odd = float(1.0 / np.sqrt(np.sum(w[odd])))
+        e_even = float(1.0 / np.sqrt(np.sum(w[even])))
+        sig = float(np.hypot(e_odd, e_even))
         out.update(depth_odd=d_odd, depth_even=d_even,
+                   depth_odd_err=e_odd, depth_even_err=e_even,
                    odd_even_sigma=abs(d_odd - d_even) / sig)
     return out
+
+
+def missing_parity(diag: dict, zero_sigma: float = 2.0,
+                   detect_sigma: float = 3.0) -> Optional[str]:
+    """'odd' or 'even' when the transits of that parity are absent.
+
+    Absent: that parity's mean depth is within zero_sigma of zero (or
+    negative), while the other parity is detected at > detect_sigma and the
+    two differ by > detect_sigma.  The period is then probably 2P (a planet
+    or an EB at 2P), not an EB at P with unequal eclipses.
+    """
+    if "depth_odd_err" not in diag:
+        return None
+    for name, other in (("odd", "even"), ("even", "odd")):
+        d, e = diag[f"depth_{name}"], diag[f"depth_{name}_err"]
+        do, eo = diag[f"depth_{other}"], diag[f"depth_{other}_err"]
+        if (d < zero_sigma * e and do > detect_sigma * eo
+                and (do - d) / np.hypot(e, eo) > detect_sigma):
+            return name
+    return None
 
 
 def _planck_ratio_temperature(ratio, teff_star, lam_um=0.80):
@@ -3805,6 +4200,51 @@ def _stack_stats(rows):
         snr_loo, drop = float("nan"), None
     return dict(n=len(d), depth=m, snr=m / em, chi2r=chi2r,
                 snr_loo=float(snr_loo), drop=drop)
+
+
+def _refine_secondary_centre(bin_phase, bin_mean, bin_n, phi0, d_ph,
+                             width_factors=(0.6, 0.8, 1.0, 1.2, 1.5, 2.0)):
+    """Centre and width of a secondary eclipse from a local box fit.
+
+    The box search compares the box with baselines up to 2 widths away, so a
+    phase curve (ellipsoidal variation, reflection, beaming) can pull its
+    maximum off the eclipse centre (WASP-18 b: 0.519 instead of 0.500).
+    Here a box of trial centre and width plus a quadratic baseline is fitted
+    to the binned fold within +-1.5 widths (weights = points per bin); the
+    pair with the lowest chi2 wins.  Returns (phase, width_factor) or
+    (None, None).
+    """
+    best = (np.inf, None, None)
+    step = d_ph / 40.0
+    for fac in width_factors:
+        w = fac * d_ph
+        span = 1.5 * w + 0.5 * d_ph
+        for c in phi0 + np.arange(-0.5 * d_ph, 0.5 * d_ph + 0.5 * step, step):
+            x = (bin_phase - c + 0.5) % 1.0 - 0.5
+            k = (np.abs(x) < span) & (bin_n > 0)
+            if k.sum() < 12:
+                continue
+            xx, yy, ww = x[k] / span, bin_mean[k], bin_n[k]
+            box = (np.abs(x[k]) < 0.5 * w).astype(float)
+            if box.sum() < 3 or (1 - box).sum() < 6:
+                continue
+            A = np.vstack([np.ones_like(xx), xx, xx ** 2, -box]).T
+            sw = np.sqrt(ww)
+            coef, *_ = np.linalg.lstsq(A * sw[:, None], yy * sw, rcond=None)
+            if coef[3] <= 0:
+                continue
+            # chi2 per bin normalised by the window size, so different
+            # widths (different numbers of bins) can be compared
+            r = (yy - A @ coef) * sw
+            chi = float(np.sum(r ** 2) / max(k.sum() - 4, 1))
+            # compare widths by the improvement over a box-free fit
+            A0 = A[:, :3]
+            c0, *_ = np.linalg.lstsq(A0 * sw[:, None], yy * sw, rcond=None)
+            chi0 = float(np.sum(((yy - A0 @ c0) * sw) ** 2) / max(k.sum() - 3, 1))
+            gain = chi0 - chi
+            if -gain < best[0]:
+                best = (-gain, float(c % 1.0), float(fac))
+    return best[1], best[2]
 
 
 def secondary_eclipse_search(time, flux, P, T0, dur, dur_factors=(0.5, 0.75, 1.0, 1.5, 2.0),
@@ -3933,6 +4373,31 @@ def secondary_eclipse_search(time, flux, P, T0, dur, dur_factors=(0.5, 0.75, 1.0
         cands, key=lambda c: c["snr"] if np.isfinite(c["snr"]) else -np.inf)
     j = best["j"]
     phi_b, fac_b = best["phase"], best["width_factor"]
+    # the box search measures against baselines up to 2 widths away, so a
+    # phase curve pulls its maximum off the eclipse centre (WASP-18 b: 0.515
+    # instead of 0.500).  Refine centre and width with
+    # a local box + quadratic-baseline fit
+    if best["coherent"]:
+        with np.errstate(invalid="ignore", divide="ignore"):
+            bmean = np.where(cnt > 0, sm / np.maximum(cnt, 1), np.nan)
+        phi_r, fac_r = _refine_secondary_centre(0.5 * (edges[1:] + edges[:-1]),
+                                                np.nan_to_num(bmean), cnt,
+                                                phi_b, dur / P)
+        if phi_r is not None and (abs(phi_r - phi_b) > 0.25 * dphi_bin
+                                  or abs(fac_r - fac_b) > 1e-9):
+            rows = _secondary_epoch_depths(time, flux, P, T0, phi_r, fac_r * dur, sig_pt)
+            st = _stack_stats(rows)
+            if st["n"] >= 2 and st["snr"] >= min_snr:
+                infl = float(np.sqrt(max(st["chi2r"], 1.0))) if np.isfinite(st["chi2r"]) else np.inf
+                st["snr_infl"] = float(st["snr"] / infl) if np.isfinite(infl) else float("nan")
+                st.update(j=j, phase=float(phi_r), width_factor=float(fac_r),
+                          snr_box=best["snr_box"], rows=rows,
+                          frac_dip=float(np.mean([r[2] > 0 for r in rows])),
+                          reasons=[], coherent=True,
+                          phase_grid=float(phi_b), width_grid=float(fac_b))
+                cands[cands.index(best)] = st
+                best = st
+                phi_b, fac_b = best["phase"], best["width_factor"]
     n_ep = best["n"]
     phi_rel = (phi_b + 0.5) % 1.0 - 0.5               # in (-0.5, 0.5]
     return dict(phase=phi_b, snr=float(best["snr"]), depth=float(best["depth"]),
@@ -4031,6 +4496,20 @@ def plot_per_transit_depths(dt, diag, cfg: Config, tic: int) -> None:
                  label="at edge of search range")
         ax2.legend(loc="best", fontsize=8)
     ax2.axhline(0, color="k", lw=0.6)
+    # robust y-ranges: one transit with a poorly constrained mid-time or
+    # depth (error bar of days) must not squash all the others
+    # (WASP-18: y-axis to 1e7 min)
+    def _robust_lim(ax_, y, e):
+        y, e = np.asarray(y, float), np.asarray(e, float)
+        k = np.isfinite(y)
+        if k.sum() < 5:
+            return
+        lo, hi = np.nanpercentile(y[k], [1, 99])
+        ee = np.nanmedian(e[k & np.isfinite(e)]) if np.isfinite(e[k]).any() else 0
+        pad = 0.15 * (hi - lo) + 2 * ee
+        ax_.set_ylim(lo - pad, hi + pad)
+    _robust_lim(ax, dt["depth"] * 1e6, dt["e_depth"] * 1e6)
+    _robust_lim(ax2, dt["dTc"] * 1440.0, dt["e_dTc"] * 1440.0)
     ax2.set_xlabel(f"Nominal transit mid-time ({TIME_LABEL})")
     ax2.set_ylabel("Measured - nominal Tc (min)")
     fig.tight_layout()
@@ -4291,6 +4770,48 @@ def fit_source_position(image, err=None, col0=0, row0=0, cfg: Config = None,
                 sigma=float(sig), bkg=float(bkg), snr=float(snr))
 
 
+def _clean_cube(t, cube, nsig=5.0, max_dev=0.2):
+    """Drop the bad frames of a TESS cut-out cube.
+
+    TESSCut cubes are not background-subtracted, and FFI sectors with strong
+    scattered light have frames whose background is 10-100 x the normal
+    level (WASP-18, sectors 96-106: total-flux scatter > 200 %).  Such frames
+    swamp the per-epoch differences: the difference-image S/N fell from ~170
+    to < 1.  The background of each frame is estimated (20th percentile of
+    its pixels) and frames are dropped when the background deviates by more
+    than *nsig* robust sigma from the sector median, when the
+    background-subtracted total flux deviates by more than *max_dev*
+    (fractional), or when they contain no finite pixels.
+    """
+    flat = cube.reshape(cube.shape[0], -1)
+    fin = np.isfinite(flat).any(axis=1)
+    bkg = np.full(cube.shape[0], np.nan)
+    if fin.any():
+        bkg[fin] = np.nanpercentile(flat[fin], 20, axis=1)
+    sub = cube - bkg[:, None, None]
+    tot = np.nansum(sub.reshape(cube.shape[0], -1), axis=1)
+    keep = fin & np.isfinite(bkg) & np.isfinite(t)
+
+    def _ok(x):
+        m = np.nanmedian(x[keep])
+        r = 1.4826 * np.nanmedian(np.abs(x[keep] - m))
+        if not np.isfinite(r) or r <= 0:
+            return np.ones_like(keep)
+        return np.abs(x - m) < nsig * r
+    keep &= _ok(bkg)
+    # the total flux only catches gross failures (the transit itself must
+    # survive: a robust-sigma cut would remove a deep transit)
+    mt = np.nanmedian(tot[keep]) if keep.any() else np.nan
+    if np.isfinite(mt) and mt > 0:
+        keep &= np.abs(tot / mt - 1.0) < max_dev
+    # the frames themselves are returned WITHOUT the background removed: a
+    # percentile background of a small cut-out around a bright star contains
+    # its PSF wings, dips during the transit and leaves a pedestal in the
+    # difference image that pulls the centroid (WASP-18 s3: 0.08 px); slow
+    # backgrounds cancel in the local in/out windows anyway
+    return t[keep], cube[keep]
+
+
 def build_difference_image(sd: SectorData, P, T0, dur, cfg: Config):
     """Out-of-transit minus in-transit image, averaged over the epochs.
 
@@ -4300,6 +4821,9 @@ def build_difference_image(sd: SectorData, P, T0, dur, cfg: Config):
     """
     t, cube = sd.cube_time, sd.cube
     if t is None or cube is None:
+        return None
+    t, cube = _clean_cube(np.asarray(t, float), np.asarray(cube, float))
+    if t.size < 2 * cfg.di_min_frames:
         return None
 
     ph = (t - T0 + 0.5 * P) % P - 0.5 * P
@@ -4331,7 +4855,12 @@ def build_difference_image(sd: SectorData, P, T0, dur, cfg: Config):
     diff = np.average(diffs, axis=0, weights=w)
 
     if n_used >= 3:
-        diff_err = np.std(diffs, axis=0, ddof=1) / np.sqrt(n_used)
+        # robust per-pixel scatter of the epoch differences (one bad epoch
+        # must not inflate the error of the whole sector)
+        mad = 1.4826 * np.nanmedian(np.abs(diffs - np.nanmedian(diffs, axis=0)), axis=0)
+        sd_ = np.nanstd(diffs, axis=0, ddof=1)
+        diff_err = np.where(np.isfinite(mad) & (mad > 0), np.minimum(mad, sd_), sd_) \
+            / np.sqrt(n_used)
     else:
         # single/double epoch: propagate the frame-to-frame scatter instead
         scatter = np.nanstd(cube[out_mask], axis=0)
@@ -4370,7 +4899,13 @@ def difference_image_analysis(sectors_data, stars, P, T0, dur, cfg: Config,
         xt, yt = sd.wcs.world_to_pixel(c_target)
         xt, yt = float(xt) + sd.col0, float(yt) + sd.row0
 
-        fit_diff = fit_source_position(di["diff"], di["diff_err"],
+        # the PRF fit uses uniform pixel weights: the per-pixel scatter of
+        # the epoch differences is largest on the PSF core and flanks
+        # (pointing jitter), and weighting by it pulls the centroid off the
+        # source by up to ~0.4 px for a bright star (WASP-18); the per-pixel
+        # errors still set the noise of the Monte Carlo below
+        err_fit = np.full_like(di["diff_err"], float(np.nanmedian(di["diff_err"])))
+        fit_diff = fit_source_position(di["diff"], err_fit,
                                        col0=sd.col0, row0=sd.row0, cfg=cfg)
         # direct image: the target's own PRF (start at, and stay near, it)
         fit_dir = fit_source_position(di["direct"], None,
@@ -4386,7 +4921,7 @@ def difference_image_analysis(sectors_data, stars, P, T0, dur, cfg: Config,
         rng = np.random.default_rng(12345 + sd.sector)
         for _ in range(cfg.di_mc):
             noisy = di["diff"] + rng.normal(0.0, di["diff_err"])
-            f = fit_source_position(noisy, di["diff_err"],
+            f = fit_source_position(noisy, err_fit,
                                     col0=sd.col0, row0=sd.row0, cfg=cfg)
             if f is not None:
                 xs.append(f["x"])
@@ -4598,7 +5133,7 @@ def _q_from_u(u1, u2):
 
 
 def fit_limb_darkened(t, f, P, dur, depth, cfg: Config, u_claret=None,
-                      exp_time=0.0):
+                      exp_time=0.0, rho_prior=None):
     """Least-squares fit of a limb-darkened transit to the folded (binned) LC.
 
     Free: Rp/Rs, b, a/Rs, small T0 shift, baseline f0 (+ Kipping q1,q2 when
@@ -4608,6 +5143,10 @@ def fit_limb_darkened(t, f, P, dur, depth, cfg: Config, u_claret=None,
 
     Returns dict with parameters, 1-sigma errors (covariance scaled by the
     reduced chi2 of this fit), derived quantities and model callables.
+
+    rho_prior = (rho_cgs, sigma_dex): optional log-normal prior on the
+    stellar density (from a/Rs and P), used when the free fit lands on an
+    implausible branch of the b - a/Rs degeneracy.
     """
     t = np.asarray(t, float)
     f = np.asarray(f, float)
@@ -4645,14 +5184,29 @@ def fit_limb_darkened(t, f, P, dur, depth, cfg: Config, u_claret=None,
         return limb_darkened_lc(tt, P, rp, aRs, b, u1, u2, t0s=t0s, f0=f0,
                                 exp_time=et)
 
-    def resid(x):
-        return (f - model_x(x, t)) / sig0
+    _G = 6.674e-8
 
+    def _rho(aRs):
+        return 3.0 * np.pi * aRs ** 3 / (_G * (P * 86400.0) ** 2)
+
+    def resid(x):
+        r = (f - model_x(x, t)) / sig0
+        if rho_prior is not None:
+            r = np.append(r, (np.log10(max(_rho(x[2]), 1e-12))
+                              - np.log10(rho_prior[0])) / rho_prior[1])
+        return r
+
+    a_prior = None
+    if rho_prior is not None:
+        a_prior = float((rho_prior[0] * _G * (P * 86400.0) ** 2
+                         / (3.0 * np.pi)) ** (1.0 / 3.0))
     best = None
     for b0 in (0.2, 0.55, 0.85):
         # a/Rs from the duration: T14 ~ P/pi * sqrt((1+p)^2 - b^2) / aRs
         arg = max((1 + p0) ** 2 - b0 ** 2, 0.05)
         a0 = float(np.clip(P / (np.pi * dur) * np.sqrt(arg), 1.5, 250.0))
+        if a_prior is not None:
+            a0 = float(np.clip(a_prior, 1.5, 250.0))
         x0 = [p0, b0, a0, 0.0, 1.0] + ([0.35, 0.3] if free_ld else [])
         x0 = np.clip(x0, np.array(lo) + 1e-6, np.array(hi) - 1e-6)
         try:
@@ -4690,7 +5244,7 @@ def fit_limb_darkened(t, f, P, dur, depth, cfg: Config, u_claret=None,
 
     tg = np.linspace(-1.5 * dur, 1.5 * dur, 1501)
     depth_ld = float(f0 - np.min(model_x(x, tg, et=0.0)))
-    rho = 3.0 * np.pi * aRs ** 3 / (6.674e-8 * (P * 86400.0) ** 2)  # g/cm^3
+    rho = _rho(aRs)                                                  # g/cm^3
 
     out = dict(
         mode=mode, n_free=n_free, dof=dof, sigma0_ppm=sig0 * 1e6,
@@ -4700,11 +5254,42 @@ def fit_limb_darkened(t, f, P, dur, depth, cfg: Config, u_claret=None,
         rp=rp, b=b, aRs=aRs, inc_deg=inc, t0_shift_d=t0s, f0=f0,
         u1=float(u1), u2=float(u2),
         depth_ppm=depth_ld * 1e6, T14_h=_dur(1 + rp) * 24, T23_h=_dur(1 - rp) * 24,
-        rho_star_cgs=float(rho),
+        rho_star_cgs=float(rho), rho_prior=rho_prior,
         model=lambda tt, _x=x: model_x(_x, np.asarray(tt, float)),
         model_intrinsic=lambda tt, _x=x: model_x(_x, np.asarray(tt, float), et=0.0),
     )
     return out
+
+
+def ld_depth_keep_reason(ld_fit, depth, diag, cfg) -> str:
+    """Why the LD-fit depth should NOT replace the adopted (per-transit)
+    depth, or '' when it may.
+
+    With b unconstrained (large error, or a fit stuck at b ~ 0) the LD-fit
+    depth depends on an arbitrary point of the b - Rp/Rs degeneracy; and an
+    LD depth far outside the per-transit depth's error means the fold and
+    the per-transit fits disagree.  In both cases the measured per-transit
+    depth is the safer input for TRICERATOPS."""
+    try:
+        d_ld = float(ld_fit["depth_ppm"]) * 1e-6
+    except (KeyError, TypeError, ValueError):
+        return "no LD-fit depth"
+    if not (np.isfinite(d_ld) and d_ld > 0):
+        return "LD-fit depth not finite"
+    b, eb = (ld_fit.get("params", {}) or {}).get("b", (np.nan, np.nan))
+    b, eb = float(b), float(eb)
+    bmax = float(getattr(cfg, "ld_b_unconstrained_err", 0.3))
+    if not np.isfinite(eb) or eb > bmax:
+        b_txt = f"b = {b:.2f} +/- {eb:.2g}" if np.isfinite(eb) else "b error undefined"
+        return f"b unconstrained ({b_txt})"
+    if np.isfinite(b) and b < 0.01:
+        return f"b stuck at the b = 0 limit (b = {b:.4f} +/- {eb:.2g})"
+    e = float((diag or {}).get("depth_err", np.nan)) if isinstance(diag, dict) else np.nan
+    nsig = float(getattr(cfg, "ld_depth_max_sigma", 3.0))
+    if np.isfinite(e) and e > 0 and abs(d_ld - depth) > nsig * e:
+        return (f"LD-fit depth differs from the per-transit depth by "
+                f"{abs(d_ld - depth) / e:.1f} sigma (> {nsig:g})")
+    return ""
 
 
 def fit_limb_darkened_lc(tp, lc, P, dur, depth, star, sectors_data,
@@ -4726,6 +5311,35 @@ def fit_limb_darkened_lc(tp, lc, P, dur, depth, star, sectors_data,
 
     fit = fit_limb_darkened(t_b[good], f_b[good], P, dur, depth, cfg,
                             u_claret=u_claret, exp_time=exp_time)
+    mass, rad = star.get("mass", np.nan), star.get("rad", np.nan)
+    rho_cat = (1.41 * mass / rad ** 3
+               if np.isfinite(mass) and np.isfinite(rad) and rad > 0 else np.nan)
+    fit["rho_catalogue_cgs"] = float(rho_cat)
+    lim = float(getattr(cfg, "ld_rho_ratio_max", 3.0))
+    if np.isfinite(rho_cat) and rho_cat > 0 and fit["rho_star_cgs"] > 0:
+        ratio = fit["rho_star_cgs"] / rho_cat
+        if not (1.0 / lim <= ratio <= lim):
+            _log(log, f"\n  ! limb-darkened fit without prior: b = {fit['b']:.2f}, "
+                      f"a/Rs = {fit['aRs']:.1f}, T14 = {fit['T14_h']:.2f} h, "
+                      f"stellar density {fit['rho_star_cgs']:.2f} g/cm^3 = "
+                      f"{ratio:.2f} x the catalogue value: an implausible branch "
+                      f"of the b - a/Rs degeneracy (an eccentric orbit changes "
+                      f"the density by less than ~x{lim:g}); refitted with a "
+                      f"density prior ({rho_cat:.2f} g/cm^3 +/- "
+                      f"{cfg.ld_rho_prior_dex:g} dex)")
+            try:
+                fit2 = fit_limb_darkened(
+                    t_b[good], f_b[good], P, dur, depth, cfg, u_claret=u_claret,
+                    exp_time=exp_time, rho_prior=(rho_cat, cfg.ld_rho_prior_dex))
+                fit2["unconstrained_fit"] = dict(
+                    b=fit["b"], aRs=fit["aRs"], T14_h=fit["T14_h"],
+                    depth_ppm=fit["depth_ppm"], rho_star_cgs=fit["rho_star_cgs"])
+                fit2["rho_catalogue_cgs"] = float(rho_cat)
+                fit = fit2
+            except Exception as exc:
+                _log(log, f"  ! refit with the density prior failed ({exc})")
+            fit["density_implausible"] = bool(not (
+                1.0 / lim <= fit["rho_star_cgs"] / rho_cat <= lim))
     fit["t_bins"], fit["f_bins"], fit["exp_time_d"] = t_b[good], f_b[good], exp_time
 
     _log(log, "\n--- Limb-darkened transit fit of the folded LC "
@@ -4740,7 +5354,8 @@ def fit_limb_darkened_lc(tp, lc, P, dur, depth, star, sectors_data,
               f"a/Rs = {fit['aRs']:.3f},  i = {fit['inc_deg']:.2f} deg")
     _log(log, f"  depth = {fit['depth_ppm']:.0f} ppm,  "
               f"T14 = {fit['T14_h']:.3f} h,  T23 = {fit['T23_h']:.3f} h")
-    _log(log, f"  rho_star (circular orbit) = {fit['rho_star_cgs']:.3f} g/cm^3")
+    _log(log, f"  rho_star (circular orbit) = {fit['rho_star_cgs']:.3f} g/cm^3"
+              + ("  (with the density prior)" if fit.get("rho_prior") else ""))
     try:
         _rp, _b = float(fit["rp"]), float(fit["b"])
         fit["grazing"] = bool(_b > 1.0 - _rp)
@@ -4756,7 +5371,6 @@ def fit_limb_darkened_lc(tp, lc, P, dur, depth, star, sectors_data,
                       f"eclipsing binaries.")
     except (KeyError, TypeError, ValueError):
         pass
-    mass, rad = star.get("mass", np.nan), star.get("rad", np.nan)
     if np.isfinite(mass) and np.isfinite(rad) and rad > 0:
         rho_tic = 1.41 * mass / rad ** 3          # rho_sun = 1.41 g/cm^3
         _log(log, f"  rho_star from TIC mass/radius       = {rho_tic:.3f} g/cm^3"
@@ -5210,6 +5824,124 @@ def _dilution_kwargs(func, cfg: Config) -> dict:
 
 
 
+def eb_evidence(summary: dict, cfg) -> list:
+    """The pipeline's own evidence against a planet at this period, which
+    TRICERATOPS does not see: a detected secondary eclipse, odd/even depths
+    different by more than eb_veto_odd_even_sigma, an absent parity."""
+    out = []
+    sec = summary.get("secondary") or {}
+    if sec.get("detected"):
+        ph, dp = sec.get("phase"), sec.get("depth_ppm")
+        txt = ("a secondary eclipse was detected"
+               + (f" at phase {ph:.3f}" if ph is not None else "")
+               + (f" ({dp:.0f} ppm)" if dp is not None else ""))
+        # A hot planet passing behind its star also gives a (shallow)
+        # secondary eclipse: e.g. WASP-18b, ~340 ppm in the TESS band.  Only
+        # a secondary that is too deep / too hot for a planet is EB evidence.
+        tc = sec.get("companion_T_K")
+        prim = summary.get("depth_ppm_adopted")
+        tmax = float(getattr(cfg, "eb_veto_planet_tmax", 4000.0))
+        rmax = float(getattr(cfg, "eb_veto_planet_depth_ratio", 0.1))
+        planet_like = (tc is not None and np.isfinite(tc) and tc < tmax
+                       and dp is not None and prim and dp / float(prim) < rmax)
+        if planet_like:
+            summary.setdefault("eb_hints", []).append(
+                txt + f": shallow ({dp / float(prim) * 100:.1f} % of the primary) and "
+                f"cool ({tc:.0f} K) enough to be the occultation of a hot planet - "
+                f"not used against the planet; a mass (RV) decides")
+        else:
+            out.append(txt + (f", brightness temperature {tc:.0f} K" if tc else ""))
+    mp = summary.get("missing_parity")
+    if mp:
+        out.append(f"no transit at the {mp} epochs (the period is probably 2P)")
+    oe = summary.get("odd_even_sigma")
+    lim = float(getattr(cfg, "eb_veto_odd_even_sigma", 3.0))
+    if oe is not None and np.isfinite(oe) and oe > lim and not mp:
+        out.append(f"odd and even depths differ by {oe:.1f} sigma")
+    return out
+
+
+def _store_scenario_table(target, p, cfg) -> None:
+    """Pooled probability per scenario row (with the best-fit companion of
+    the last run), the stars that can host the signal and the distance, for
+    the observation recommendations."""
+    tab = getattr(target, "probs", None)
+    if tab is None or p is None or len(p) != len(tab):
+        return
+    cols = ("M_s", "R_s", "R_p", "M_EB", "R_EB", "M_comp", "R_comp",
+            "flux_ratio_comp_T")
+    rows = []
+    for k, (_, r) in enumerate(tab.iterrows()):
+        try:
+            rid = int(r["ID"])
+        except (KeyError, TypeError, ValueError):
+            rid = None
+        d = {"ID": rid, "scenario": str(r.get("scenario", "")), "prob": float(p[k])}
+        for c in cols:
+            if c in tab.columns:
+                try:
+                    v = float(r[c])
+                    d[c] = v if np.isfinite(v) else None
+                except (TypeError, ValueError):
+                    d[c] = None
+        rows.append(d)
+    _summary(cfg)["scenario_probs"] = rows
+    st = getattr(target, "stars", None)
+    if st is not None and len(st):
+        nb = []
+        for k, (_, r) in enumerate(st.iterrows()):
+            td = float(r["tdepth"]) if "tdepth" in st.columns else np.nan
+            if k > 0 and not (np.isfinite(td) and td > 0):
+                continue
+            g = lambda c: (float(r[c]) if c in st.columns and np.isfinite(  # noqa: E731
+                pd.to_numeric(r[c], errors="coerce")) else None)
+            if "ID" not in st.columns:
+                continue
+            nb.append(dict(ID=int(r["ID"]), sep=g("sep (arcsec)") or 0.0,
+                           Tmag=g("Tmag"), Teff=g("Teff"), fluxratio=g("fluxratio"),
+                           tdepth=td if np.isfinite(td) else None))
+        _summary(cfg)["neighbours"] = nb
+        try:
+            dpc = float(st["d"].iloc[0])
+            if np.isfinite(dpc) and dpc > 0:
+                _summary(cfg)["distance_pc"] = dpc
+        except (KeyError, TypeError, ValueError):
+            pass
+
+
+def write_recommendations(cfg, log=None) -> None:
+    """'Next observations' from the scenario probabilities (log, summary,
+    recommendations_<TIC>.txt); see triceratops_recommend.py."""
+    try:
+        import triceratops_recommend as _rc
+    except ImportError:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import triceratops_recommend as _rc
+    S = _summary(cfg)
+    if not S.get("scenario_probs"):
+        return
+    res = _rc.recommend(S, seeing_fwhm=float(getattr(cfg, "ground_fwhm_default", 3.0)),
+                        hires_iwa=float(getattr(cfg, "hires_iwa", 0.1)))
+    _log(log, "\n--- Next observations: what each kind of follow-up can remove "
+              "(scenario probabilities above; best case and typical) ---")
+    for line in res["text"]:
+        _log(log, "  " + line)
+    S["recommendations"] = dict(
+        text=res["text"],
+        plan=[p["key"] for p in res["plan"]],
+        items=[{k: it[k] for k in ("key", "title", "scenarios", "prob_addressed",
+                                   "fpp_after", "nfpp_after", "fpp_typical",
+                                   "nfpp_typical", "meets")}
+               for it in res["items"]])
+    try:
+        with open(cfg.path(f"recommendations_{cfg.tic}.txt"), "w",
+                  encoding="utf-8") as fh:
+            fh.write(f"Next observations for TIC {cfg.tic}\n\n")
+            fh.write("\n".join(res["text"]) + "\n")
+    except OSError:
+        pass
+
+
 def _probs_from_lnZ(lnZ):
     """Scenario probabilities, FPP and NFPP from log-evidences (same formulas
     as triceratops 1.1: softmax of lnZ; FPP = 1 - (TP + PTP + DTP); NFPP =
@@ -5414,14 +6146,20 @@ def _calc_probs_checked(target, lc, P_orb, sigma, cfg: Config,
     reason = "not run"
     for attempt in range(n_retry + 1):
         try:
-            with warnings.catch_warnings():
+            cc_file = (os.path.abspath(cfg.contrast_curve_file)
+                       if cfg.contrast_curve_file else None)
+            # TRICERATOPS(+) writes <ID>_TRILEGAL.csv / _gaia_background.csv
+            # to the working directory: run it in the output folder
+            with warnings.catch_warnings(), _in_dir(cfg.outdir):
                 # the RuntimeWarnings are diagnosed explicitly by _check_run
                 warnings.simplefilter("ignore", RuntimeWarning)
+                if cfg._molusc_tri and _accepts(target.calc_probs, "molusc_file"):
+                    kw = dict(kw, molusc_file=os.path.abspath(cfg._molusc_tri))
                 target.calc_probs(time=lc.time.value,
                                   flux_0=lc.flux.value,
                                   flux_err_0=s,
                                   P_orb=P_orb,
-                                  contrast_curve_file=cfg.contrast_curve_file,
+                                  contrast_curve_file=cc_file,
                                   filt=cfg.contrast_filt,
                                   parallel=cfg.parallel,
                                   verbose=0, **extra, **kw)
@@ -5627,6 +6365,18 @@ def _nullcontext():
     yield
 
 
+@contextmanager
+def _in_dir(path):
+    """Temporarily change the working directory (restored on exit)."""
+    old = os.getcwd()
+    try:
+        os.makedirs(path, exist_ok=True)
+        os.chdir(path)
+        yield
+    finally:
+        os.chdir(old)
+
+
 def _drop_flagged_tic_rows(target, tic) -> None:
     """Remove TIC entries flagged ARTIFACT / DUPLICATE / SPLIT from the
     TRICERATOPS star table (and the matching pix_coords rows).
@@ -5720,17 +6470,28 @@ def make_target(tic, sectors, apertures, depth, cfg: Config):
             trilegal = _ensure_griz_columns(trilegal)
         kwargs["trilegal_fname"] = trilegal
 
-    st0 = getattr(cfg, "_target_star", None) or getattr(cfg, "_star", None) or {}
-    kic_pos = (_kic_position_offline(cfg.kic, st0.get("ra"), st0.get("dec"))
-               if is_kepler() and np.isfinite(st0.get("ra", np.nan))
-               and not (getattr(cfg, "host_tic", None)
-                        and int(cfg.host_tic) != int(tic))
-               else _nullcontext())
+    # Kepler: answer TRICERATOPS' VizieR query for the KIC position locally
+    # (the host's position with --host-tic).  A factory: a context manager
+    # made with @contextmanager can be entered only once, and the call below
+    # may be retried.
     if is_kepler() and getattr(cfg, "host_tic", None) and int(cfg.host_tic) != int(tic):
-        hs = getattr(cfg, "_star", {}) or {}
-        kic_pos = _kic_position_offline(cfg.kic, hs.get("ra"), hs.get("dec"))
+        pos = getattr(cfg, "_star", {}) or {}
+    else:
+        pos = getattr(cfg, "_target_star", None) or getattr(cfg, "_star", None) or {}
+    use_pos = is_kepler() and np.isfinite(pos.get("ra", np.nan))
+
+    def kic_pos():
+        return (_kic_position_offline(cfg.kic, pos.get("ra"), pos.get("dec"))
+                if use_pos else _nullcontext())
+
+    # triceratops writes <ID>_gaia_background.csv to the working directory:
+    # run it in the output folder (all paths passed to it are absolute)
+    if kwargs.get("trilegal_fname"):
+        kwargs["trilegal_fname"] = os.path.abspath(kwargs["trilegal_fname"])
+    if kwargs.get("lightkurve_cache_dir"):
+        kwargs["lightkurve_cache_dir"] = os.path.abspath(kwargs["lightkurve_cache_dir"])
     try:
-        with _triceratops_tesscut_cache(tic, cfg), kic_pos:
+        with _triceratops_tesscut_cache(tic, cfg), kic_pos(), _in_dir(cfg.outdir):
             target = tr.target(**kwargs)
     except Exception as exc1:
         print(f"  TRICERATOPS target initialisation failed ({exc1}); this is "
@@ -5752,7 +6513,7 @@ def make_target(tic, sectors, apertures, depth, cfg: Config):
             )
             raise RuntimeError(msg) from exc1
         kwargs["trilegal_fname"] = gaia_file
-        with _triceratops_tesscut_cache(tic, cfg), kic_pos:
+        with _triceratops_tesscut_cache(tic, cfg), kic_pos(), _in_dir(cfg.outdir):
             target = tr.target(**kwargs)
 
     # Cache whatever table was used
@@ -5844,6 +6605,50 @@ def nfpp_input_summary(target, depth, cfg: Config, log=None, n_removed=0):
                   "from the flux budget (not from missing follow-up).")
 
 
+def prepare_molusc_for_triceratops(cfg: Config, tic) -> dict:
+    """Turn a MOLUSC '<prefix>_kept.csv' into the file calc_probs reads.
+
+    TRICERATOPS(+) keeps the MOLUSC companions with periastron a(1-e) > 10 au,
+    uses their mass ratios for the first draws of a scenario and pads the
+    other draws with q = 0 ('no companion').  The prior probability of a
+    companion is therefore n_rows / N -- which depends on how many
+    companions MOLUSC happened to generate, and crashes when n_rows > N.
+    Here the survivors are resampled (with replacement, shuffled) to
+        n_rows = round(N * multiplicity * n_kept(>10 au) / n_generated)
+    so that the prior is the MOLUSC survival fraction times the assumed
+    multiplicity, independent of the MOLUSC sample size."""
+    df = pd.read_csv(cfg.molusc_file)
+    for c in ("mass ratio", "semi-major axis(AU)", "eccentricity"):
+        if c not in df.columns:
+            raise ValueError(f"column '{c}' missing (not a MOLUSC _kept.csv file?)")
+    n_gen = cfg.molusc_n
+    if not n_gen or n_gen <= 0:
+        raise ValueError("give the number of companions MOLUSC generated "
+                         "(--molusc-n): the prior depends on it")
+    if len(df) > n_gen:
+        raise ValueError(f"{len(df)} survivors but only {n_gen} generated: wrong --molusc-n")
+    peri = df["semi-major axis(AU)"].values * (1 - df["eccentricity"].values)
+    ok = df[peri > 10].reset_index(drop=True)
+    N = int(cfg.tri_N) if cfg.tri_N else 1_000_000
+    prior = float(cfg.molusc_multiplicity) * len(ok) / float(n_gen)
+    n_rows = int(round(min(prior, 1.0) * N))
+    rng = np.random.default_rng(int(tic) % (2 ** 32))
+    if len(ok) == 0 or n_rows == 0:
+        sample = ok.iloc[:0]
+    else:
+        sample = ok.iloc[rng.integers(0, len(ok), n_rows)]
+    fn = cfg.path(f"molusc_for_triceratops_{tic}.csv")
+    sample.to_csv(fn, index=False)
+    q = ok["mass ratio"].values
+    return dict(file=fn, n_generated=int(n_gen), n_kept=int(len(df)),
+                frac_kept=len(df) / float(n_gen), n_kept_10au=int(len(ok)),
+                frac_10au=len(ok) / float(n_gen), prior=prior, N=N,
+                n_rows=int(n_rows), n_unique=int(sample.index.nunique()) if n_rows else 0,
+                q_median=float(np.median(q)) if q.size else float("nan"),
+                frac_q_gt_0p5=float(np.mean(q > 0.5)) if q.size else float("nan"),
+                multiplicity=float(cfg.molusc_multiplicity))
+
+
 def run_triceratops(target, all_ap, tic, depth, P_orb, lc, cfg: Config,
                     drop_stars=None, log=None, sigma=None):
     """Returns (target, FPPs, NFPPs, sigma_used).
@@ -5857,6 +6662,44 @@ def run_triceratops(target, all_ap, tic, depth, P_orb, lc, cfg: Config,
                   "with exp(lnZ)/sum(exp(lnZ)) and underflows to NaN for very "
                   "poor fits; consider upgrading.  Invalid runs are detected "
                   "and retried below.")
+    if cfg.molusc_file:
+        if not os.path.isfile(cfg.molusc_file):
+            _log(log, f"  ! MOLUSC file {cfg.molusc_file} not found: default "
+                      f"companion prior used")
+            cfg.molusc_file = None
+        elif not _accepts(target.calc_probs, "molusc_file"):
+            _log(log, "  ! the installed triceratops has no molusc_file "
+                      "argument: default companion prior used")
+            cfg.molusc_file = None
+        else:
+            try:
+                info = prepare_molusc_for_triceratops(cfg, tic)
+                cfg._molusc_tri = info["file"]
+                _log(log, "  bound companions from MOLUSC (" + cfg.molusc_file + "):")
+                _log(log, f"    generated {info['n_generated']:,}, kept by Gaia/imaging "
+                          f"{info['n_kept']:,} ({info['frac_kept'] * 100:.1f} %), of which "
+                          f"{info['n_kept_10au']:,} with periastron > 10 au "
+                          f"({info['frac_10au'] * 100:.2f} %), the only ones TRICERATOPS uses")
+                _log(log, f"    multiplicity assumed {cfg.molusc_multiplicity:g} "
+                          f"(MOLUSC simulates one companion per star); prior "
+                          f"probability of a usable companion = "
+                          f"{info['prior']:.4f}")
+                _log(log, f"    passed to calc_probs: {info['n_rows']:,} companions "
+                          f"resampled from the survivors for N = {info['N']:,} draws "
+                          f"(TRICERATOPS pads the rest with 'no companion'), "
+                          f"{info['n_unique']:,} distinct; median mass ratio "
+                          f"{info['q_median']:.2f}, {info['frac_q_gt_0p5'] * 100:.0f} % "
+                          f"with q > 0.5")
+                if info["n_kept_10au"] < 200:
+                    _log(log, "    ! fewer than 200 distinct companions: a few simulated "
+                              "companions can dominate the bound scenarios; run MOLUSC "
+                              "with more companions")
+                _summary(cfg)["molusc"] = {k: v for k, v in info.items() if k != "file"}
+            except Exception as exc:
+                _log(log, f"  ! MOLUSC file not usable ({exc}): default companion "
+                          f"prior used")
+                cfg.molusc_file = None
+        _summary(cfg)["molusc_file"] = cfg.molusc_file
     if sigma is None:
         sigma = float(np.nanmean(lc.flux_err.value))
         _log(log, "  ! no sigma supplied; using the mean lightkurve bin error")
@@ -6061,6 +6904,7 @@ def run_triceratops(target, all_ap, tic, depth, P_orb, lc, cfg: Config,
             for label, pc in classes:
                 _log(log, f"    {pc:8.4f}  {label}")
             _summary(cfg)["scenario_classes"] = {lab: pc for lab, pc in classes}
+        _store_scenario_table(target, pooled["p"], cfg)
 
     if cfg.tri_sensitivity and n_valid:
         _log(log, f"\nSensitivity of FPP/NFPP to the flux uncertainty "
@@ -6095,12 +6939,30 @@ def run_triceratops(target, all_ap, tic, depth, P_orb, lc, cfg: Config,
         verdict = "INDETERMINATE (FPP/NFPP not finite)"
     else:
         passed = fpp_use < 0.015 and nfpp_use < 0.001
-        verdict = "PASSED" if passed else "NOT passed"
+        veto = eb_evidence(_summary(cfg), cfg) if getattr(cfg, "eb_veto", True) else []
+        _summary(cfg)["triceratops_criteria_met"] = bool(passed)
+        for h in _summary(cfg).get("eb_hints", []):
+            _log(log, f"  note: {h}")
+        if veto:
+            _summary(cfg)["eb_evidence"] = veto
+        if passed and veto:
+            verdict = ("NOT passed: FPP and NFPP meet the criteria, but "
+                       + "; ".join(veto)
+                       + " - TRICERATOPS does not see this evidence")
+        else:
+            verdict = "PASSED" if passed else "NOT passed"
         if (pooled is not None and np.isfinite(pooled["dominance"])
                 and pooled["dominance"] > 0.5):
             verdict += " (Monte Carlo not converged: treat as provisional)"
     _log(log, f"Giacalone+2021 validation criteria "
               f"(FPP < 0.015 and NFPP < 0.001; based on {basis}): {verdict}")
+    if "scenario_probs" not in _summary(cfg) and getattr(target, "probs", None) is not None \
+            and "prob" in target.probs:
+        _store_scenario_table(target, np.asarray(target.probs["prob"], float), cfg)
+    try:
+        write_recommendations(cfg, log)
+    except Exception as exc:
+        _log(log, f"  ! recommendations not computed: {exc}")
     _summary(cfg).update(
         FPP=float(fpp_use) if np.isfinite(fpp_use) else None,
         NFPP=float(nfpp_use) if np.isfinite(nfpp_use) else None,
@@ -6873,7 +7735,7 @@ def ground_star_clearance(fits, fracs, target_tic, cfg=None):
             if not np.isfinite(td) or td <= 0:
                 continue
             exp = td * float(s["fluxratio"])
-            st, why = "allowed", "no dip and too faint here to test"
+            st, why = "allowed", "no dip; its share here too small to test"
             if not fit["usable"]:
                 st, why = "unconstrained", "transit window not covered"
             else:
@@ -6962,18 +7824,36 @@ def ground_chromaticity(fits, fracs, host_ids, tdepth_tess, cfg=None):
             p = float(_chi2.sf(c2, dof))
         else:
             mu, c2, dof, p = float("nan"), float("nan"), 0, float("nan")
-        # bluest vs reddest ground band
-        rb = float("nan")
-        if len(per_band) >= 2:
-            sb = sorted(per_band, key=lambda x: GROUND_LAMBDA_UM.get(x[0], 0.6))
-            rb = sb[-1][1] / sb[0][1] if sb[0][1] > 0 else float("nan")
+        # bluest vs reddest band (TESS counts as a band at 0.80 um when only
+        # one ground band is available)
+        rb = e_rb = float("nan")
+        b_blue = b_red = None
+        pool = list(per_band)
+        if len(per_band) < 2 and np.isfinite(td) and td > 0:
+            pool.append(("TESS", td, sys_frac * td, 0))
+        if len(pool) >= 2:
+            sb = sorted(pool, key=lambda x: GROUND_LAMBDA_UM.get(x[0], 0.6))
+            (b_blue, d_b, e_b, _), (b_red, d_r, e_r, _) = sb[0], sb[-1]
+            if d_b > 0 and d_r > 0:
+                rb = d_r / d_b
+                e_rb = rb * float(np.hypot(e_b / d_b, e_r / d_r))
         out[str(hid)] = dict(per_band=per_band, tess_intrinsic=td, mean=mu,
                              chi2=c2, dof=dof, p=p, red_over_blue=rb,
+                             e_red_over_blue=e_rb, blue_band=b_blue,
+                             red_band=b_red,
                              chromatic=bool(np.isfinite(p) and p < 0.0027))
     return out
 
 
 # ---- TRICERATOPS+ --------------------------------------------------------
+def _accepts(func, name) -> bool:
+    """True if callable *func* takes a keyword argument *name*."""
+    try:
+        return name in inspect.signature(func).parameters
+    except (TypeError, ValueError):
+        return False
+
+
 def triceratops_plus_available(target) -> bool:
     try:
         return "external_lc_files" in inspect.signature(
@@ -7288,6 +8168,9 @@ def ground_photometry_fits(cfg, tic, P, T0, dur, dt, ld_fit, shape_model,
         lcs={f["label"]: dict(band=f["band"], depth_ppm=f["depth"] * 1e6,
                               e_depth_ppm=f["e_depth"] * 1e6, snr=f["snr"],
                               detected=f["detected"], usable=f["usable"],
+                              coverage=f["coverage"], has_pre=f["has_pre"],
+                              has_post=f["has_post"],
+                              depth_up3_ppm=f["depth_up3"] * 1e6,
                               Tc_bjd=(f["Tc"] + TIME_ZERO if f["timing_ok"]
                                       else float("nan")),
                               eTc_min=(f["eTc"] * 1440 if f["timing_ok"]
@@ -7393,8 +8276,15 @@ def ground_photometry_field(target, cfg, tic, log=None) -> set:
                          if c["chromatic"] else "  -> achromatic"))
     if chrom:
         _summary(cfg).setdefault("ground", {})["chromaticity"] = {
-            h: dict(p=c["p"], chromatic=c["chromatic"],
-                    red_over_blue=c["red_over_blue"]) for h, c in chrom.items()}
+            h: dict(p=c["p"], chi2=c["chi2"], dof=c["dof"],
+                    chromatic=c["chromatic"],
+                    red_over_blue=c["red_over_blue"],
+                    e_red_over_blue=c["e_red_over_blue"],
+                    blue_band=c["blue_band"], red_band=c["red_band"],
+                    tess_intrinsic_ppm=c["tess_intrinsic"] * 1e6,
+                    per_band=[dict(band=b, depth_ppm=d * 1e6, e_ppm=e * 1e6, n=n)
+                              for b, d, e, n in c["per_band"]])
+            for h, c in chrom.items()}
         try:
             plot_ground_chromaticity(chrom, cfg, tic)
         except Exception as exc:
@@ -7402,7 +8292,15 @@ def ground_photometry_field(target, cfg, tic, log=None) -> set:
     # TRICERATOPS+
     if getattr(cfg, "tri_plus", "auto") != "off":
         gs["plus_selection"] = select_plus_lcs(fits, specs)
-        if triceratops_plus_available(target) and gs["plus_selection"]:
+        _plus_ok = triceratops_plus_available(target)
+        _not = [f"{fits[k]['label']} ({fits[k]['band']})" for k in range(len(fits))
+                if fits[k]["usable"] and k not in [kk for _, kk in gs["plus_selection"]]]
+        _summary(cfg).setdefault("ground", {}).update(
+            plus_available=bool(_plus_ok),
+            plus_bands=[pb for pb, _ in gs["plus_selection"]] if _plus_ok else [],
+            plus_lcs=[fits[k]["label"] for _, k in gs["plus_selection"]] if _plus_ok else [],
+            plus_not_used=_not)
+        if _plus_ok and gs["plus_selection"]:
             _log(log, "  TRICERATOPS+ detected: ground light curves "
                       + ", ".join(f"{fits[k]['label']} ({pb})"
                                   for pb, k in gs["plus_selection"])
@@ -7410,6 +8308,10 @@ def ground_photometry_field(target, cfg, tic, log=None) -> set:
         elif gs["plus_selection"]:
             _log(log, "  (triceratops is not TRICERATOPS+: the ground data "
                       "enter only through the star clearance)")
+    else:
+        _summary(cfg).setdefault("ground", {}).update(
+            plus_available=False, plus_off=True, plus_bands=[], plus_lcs=[],
+            plus_not_used=[f"{f['label']} ({f['band']})" for f in fits if f["usable"]])
     return drop
 
 
@@ -7432,14 +8334,19 @@ def _log(fh, text):
 def main(cfg: Config):
     
     tic = cfg.tic
-    log = open(cfg.path(f"triceratops_output_TIC{tic}.txt"), "w")
+    log = open(cfg.path(f"triceratops_output_TIC{tic}.txt"), "w", encoding="utf-8")
 
     _log(log, f"=== Statistical validation of TIC {tic} ===\n")
     _log(log, f"Output directory:       {cfg.outdir}")
     _log(log, f"TESScut cache directory: {cfg.cache_dir()}")
     _log(log, "(existing cutouts for the same TIC/sector/size are reused)\n")
+    cmd = getattr(cfg, "_command_line", None)
+    if cmd:
+        _log(log, f"Command line: {cmd}\n")
 
     cfg._summary = {}
+    if cmd:
+        _summary(cfg)["command_line"] = cmd
     # TRICERATOPS+ (and triceratops < 1.1) have no dilution_corrected
     # argument: a light curve on the target's flux scale would then be
     # corrected for the dilution a second time.  Keep the aperture scale.
@@ -7533,6 +8440,16 @@ def main(cfg: Config):
     if not sectors_data:
         raise RuntimeError("No usable sectors")
     sectors = np.array([sd.sector for sd in sectors_data])
+
+    if cfg.mask_ephemerides:
+        _log(log, "\n--- Transits of other known planets masked "
+                  "(+-0.75 T14) ---")
+        for P_m, T0_m, d_m in cfg.mask_ephemerides:
+            _log(log, f"  P = {P_m:.6f} d, T0 = {T0_m:.5f}, T14 = {d_m * 24:.2f} h")
+        for sd in sectors_data:
+            n_m = mask_other_transits(sd, cfg.mask_ephemerides)
+            if n_m:
+                _log(log, f"  sector {sd.sector:3d}: {n_m} cadences removed")
 
     # apertures and the target's flux fraction per sector
     _log(log, "\n--- Apertures (target flux fraction g from the catalogue "
@@ -7687,7 +8604,8 @@ def main(cfg: Config):
 
         # Fine-tune P/T0 and re-estimate T14 + depth on the full-res LC
         P_orb, T0, dur, depth_ref = refine_ephemeris(
-            time, flux, ferr, P_orb, T0, max(dur, dur_mask))
+            time, flux, ferr, P_orb, T0, dur,
+            extra_durs=(dur_est, dur_phys))
         if depth_ref > 0:
             depth_tls = depth_ref
 
@@ -7702,8 +8620,13 @@ def main(cfg: Config):
     # is None) a trapezoid fitted to the folded LC provides the unit shape;
     # before, this whole block was skipped, so no individual transits were
     # ever detected or tabulated.
+    # The trapezoid fitted to the fold on the ADOPTED ephemeris is used in
+    # every mode (v4.3): the TLS model comes from the binned search, on
+    # TLS's own ephemeris and with its own duration, and as a template it
+    # biased the WASP-18 mid-times by 10-17 min and the depths by -13/+4 %.
+    # The TLS model remains the fallback when the trapezoid fit fails.
     shape_model, dur_pt = None, dur
-    if results is None:
+    if True:
         try:
             t14_s, depth_s, t0s_s, mdl = fit_transit_shape(
                 time, flux, ferr, P_orb, T0, dur_guess=dur,
@@ -7750,7 +8673,10 @@ def main(cfg: Config):
 
     # refine P and T0 from the measured mid-times, then redo the fits
     if cfg.refine_from_transits and dt.size:
-        ref = refine_ephemeris_from_transits(dt, P_orb, T0, dur_pt, cfg)
+        ep_with_data = list(dt["epoch"]) + [e_ for e_, _, why in rejected
+                                             if why != "no data"]
+        ref = refine_ephemeris_from_transits(dt, P_orb, T0, dur_pt, cfg,
+                                             epochs_data=ep_with_data)
         if ref is None or "P" not in ref:
             _log(log, f"  ephemeris refinement skipped: "
                       f"{'' if ref is None else ref['reason']}")
@@ -7970,9 +8896,19 @@ def main(cfg: Config):
                           f"(> {cfg.ld_update_max_t0shift:.2f} x T14): the "
                           f"fold is probably smeared; adopted depth and T14 "
                           f"are NOT updated from the LD fit")
+            elif ld_fit.get("density_implausible"):
+                _log(log, "\n  ! the LD fit implies a stellar density far from "
+                          "the catalogue value even with the prior: adopted "
+                          "depth and T14 are NOT updated from it")
             else:
                 d_ld = float(ld_fit["depth_ppm"]) * 1e-6
-                if np.isfinite(d_ld) and d_ld > 0:
+                keep_why = ld_depth_keep_reason(ld_fit, depth, diag, cfg)
+                if keep_why:
+                    _log(log, f"\n  adopted depth NOT updated from the LD fit "
+                              f"({depth * 1e6:.0f} ppm kept, LD fit "
+                              f"{d_ld * 1e6:.0f} ppm): {keep_why}")
+                    _summary(cfg)["ld_depth_not_adopted"] = keep_why
+                elif np.isfinite(d_ld) and d_ld > 0:
                     _log(log, f"\n  updating adopted depth from LD fit: "
                               f"{depth * 1e6:.0f} -> {d_ld * 1e6:.0f} ppm")
                     depth = d_ld
@@ -7983,6 +8919,8 @@ def main(cfg: Config):
                     dur = t14_ld
             _log(log, f"  adopted for TRICERATOPS: depth = {depth * 1e6:.0f} ppm, "
                       f"T14 = {dur * 24:.2f} h")
+            _summary(cfg).update(T14_h=float(dur * 24),
+                                 depth_ppm_adopted=float(depth * 1e6))
         except Exception as exc:
             _log(log, f"\n  ! limb-darkened fit failed ({exc}); "
                       f"the trapezoid is used as reference model")
@@ -8050,16 +8988,24 @@ def main(cfg: Config):
     cfg._tri_exptime = float(et) if et and et > 0 else None
     if cfg.use_known_ephemeris and cfg.depth_known > 0:
         try:
+            # median of the bins in the central half of the transit (the
+            # mean of the 3 lowest bins was biased deep by noise when the
+            # bins are short: L 279-94 with 5-min bins)
             _ph = np.asarray(getattr(lc.time, "value", lc.time), float)
-            d_fold = 1.0 - float(np.nanmedian(np.sort(
-                np.asarray(lc.flux.value, float)[np.abs(_ph) < 0.25 * dur])[:3]))
+            _fl = np.asarray(lc.flux.value, float)
+            _in = (np.abs(_ph) < 0.25 * dur) & np.isfinite(_fl)
+            _out = (np.abs(_ph) > 0.75 * dur) & np.isfinite(_fl)
+            d_fold = float(np.nanmedian(_fl[_out]) - np.nanmedian(_fl[_in]))
+            e_fold = float(1.25 * 1.4826 * np.nanmedian(np.abs(
+                _fl[_out] - np.nanmedian(_fl[_out]))) / np.sqrt(max(_in.sum(), 1)))
         except Exception:
-            d_fold = float("nan")
+            d_fold = e_fold = float("nan")
         if np.isfinite(d_fold) and d_fold > 0 and \
-                abs(depth - d_fold) > 0.3 * max(depth, d_fold):
+                abs(depth - d_fold) > 0.3 * max(depth, d_fold) and \
+                (not np.isfinite(e_fold) or abs(depth - d_fold) > 3 * e_fold):
             _log(log, f"  ! depth passed to TRICERATOPS ({depth * 1e6:.0f} ppm) "
                       f"differs from the depth seen in this light curve "
-                      f"(~{d_fold * 1e6:.0f} ppm at the bottom of the binned "
+                      f"(~{d_fold * 1e6:.0f} ppm in the centre of the binned "
                       f"fold). Give the depth on the scale of this light "
                       f"curve: on-target (like SPOC PDCSAP) with the default "
                       f"per-sector dilution correction, the raw aperture "
@@ -8202,6 +9148,10 @@ def build_parser() -> argparse.ArgumentParser:
                          "those of --tic / --kic.  The light curve is then "
                          "used on the aperture scale (SAP, no dilution "
                          "correction).")
+    ap.add_argument("--no-eb-veto", action="store_true",
+                    help="Let the verdict depend on FPP/NFPP only, even when "
+                         "the pipeline detects a secondary eclipse, an "
+                         "odd/even difference or an absent parity.")
     ap.add_argument("--star-source", type=str, default="tic",
                     choices=("tic", "kepler"),
                     help="Host-star R, M, Teff, logg: tic (default) or kepler "
@@ -8221,6 +9171,26 @@ def build_parser() -> argparse.ArgumentParser:
                     metavar="FILE",
                     help="High-resolution imaging contrast curve: "
                          "separation [arcsec], delta mag.")
+    ap.add_argument("--bin-minutes", type=float, default=10.0, metavar="MIN",
+                    help="Bin width of the folded light curve passed to "
+                         "TRICERATOPS (default 10 min; use 5 when the "
+                         "ingress lasts ~10 min or less, e.g. small planets "
+                         "around M dwarfs).  The bin is included in the "
+                         "model exposure time.")
+    ap.add_argument("--molusc-file", type=str, default=None, metavar="FILE",
+                    help="MOLUSC output file (Wood et al. 2021): the bound "
+                         "companions still allowed by Gaia and imaging; "
+                         "TRICERATOPS then draws the companions of the "
+                         "PTP/PEB/STP/SEB scenarios from it instead of its "
+                         "default prior.")
+    ap.add_argument("--molusc-n", type=int, default=None, metavar="N",
+                    help="Number of companions MOLUSC generated for "
+                         "--molusc-file (sets the prior: survivors / N).")
+    ap.add_argument("--molusc-multiplicity", type=float, default=1.0,
+                    metavar="F",
+                    help="Fraction of stars of this type with a companion "
+                         "(MOLUSC simulates one per star; default 1 = "
+                         "conservative, ~0.27 for M dwarfs, Winters et al. 2019).")
     ap.add_argument("--vet-neighbours", action="store_true",
                     help="Vet nearby stars from their own TESS light curves "
                          "and exclude those that cannot host the signal.")
@@ -8245,6 +9215,17 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--download-dir", type=str, default=None,
                     help="TESScut / SPOC cache directory (default: <outdir>/tesscut_cache). "
                          "Already-downloaded products are reused.")
+    ap.add_argument("--net-timeout", type=float, default=300.0,
+                    help="Seconds a MAST request or TESScut download may wait for "
+                         "data before it is abandoned and retried (0: no limit, "
+                         "as astroquery). Default 300.")
+    ap.add_argument("--net-retries", type=int, default=4,
+                    help="Attempts for each MAST query and TESScut download, with "
+                         "pauses of 30, 60, 90 s ... between them. Default 4.")
+    ap.add_argument("--prefetch-only", action="store_true",
+                    help="Only download the TESScut cutouts this run would read "
+                         "(every sector, every cutout size) into the cache, then "
+                         "stop. Use with --download-dir to prepare runs in advance.")
     ap.add_argument("--lc-source", type=str, default="tesscut",
                     choices=("tesscut", "sap", "pdcsap"),
                     help="Photometry: tesscut (FFI custom aperture, default), "
@@ -8294,6 +9275,17 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Max chi2_red of the linear timing fit before the "
                          "refined ephemeris is rejected (default: 8).  Raise "
                          "for long-period targets with few transits.")
+    ap.add_argument("--mask-ephemeris", type=float, nargs="+", default=None,
+                    metavar="X",
+                    help="Mask the transits of other known planets in the "
+                         "system: P T0 T14_H for each (repeat the three values "
+                         "for more planets; T0 as for --ephemeris).  Cadences "
+                         "within 0.75 x T14 of their mid-times are removed.")
+    ap.add_argument("--ephem-adopt-max-sigma", type=float, default=None,
+                    metavar="F",
+                    help="A refined ephemeris is adopted only if it predicts "
+                         "every epoch with data to within F x T14 (1 sigma; "
+                         "default 0.25).")
     ap.add_argument("--no-tc-fit", action="store_true",
                     help="Keep the mid-time of each individual transit fixed "
                          "at the ephemeris value.")
@@ -8395,6 +9387,9 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--ground-depth-tol", type=float, default=None,
                     help="Fractional tolerance on the expected ground depth "
                          "(default 0.25).")
+    ap.add_argument("--hires-iwa", type=float, default=None, metavar="ARCSEC",
+                    help="Inner working angle of high-resolution imaging in "
+                         "the observation recommendations (default 0.1).")
     ap.add_argument("--ground-fwhm", type=float, default=None, metavar="ARCSEC",
                     help="Seeing FWHM used when a light curve gives none "
                          "(default 3.0).")
@@ -8454,8 +9449,13 @@ if __name__ == "__main__":
     cfg = Config(tic=args.tic, outdir=args.outdir, n_iter=args.n_iter,
                  mission=args.mission, kic=args.kic,
                  host_tic=args.host_tic, star_source=args.star_source,
+                 eb_veto=not args.no_eb_veto,
                  stellar_manual=(tuple(args.stellar) if args.stellar else None),
                  contrast_curve_file=args.contrast_curve,
+                 molusc_file=args.molusc_file,
+                 molusc_n=args.molusc_n,
+                 molusc_multiplicity=float(args.molusc_multiplicity),
+                 bin_minutes=float(args.bin_minutes),
                  vet_neighbours=args.vet_neighbours,
                  difference_imaging=not args.no_difference_imaging,
                  exclude_sectors=(tuple(args.exclude_sectors)
@@ -8497,6 +9497,16 @@ if __name__ == "__main__":
         cfg.P_max = float(args.p_max)
     if args.refine_chi2_max is not None:
         cfg.refine_chi2_max = float(args.refine_chi2_max)
+    if args.ephem_adopt_max_sigma is not None:
+        cfg.ephem_adopt_max_sigma = float(args.ephem_adopt_max_sigma)
+    if args.mask_ephemeris:
+        v = args.mask_ephemeris
+        if len(v) % 3:
+            ap.error("--mask-ephemeris needs P T0 T14_H for each planet "
+                     "(a multiple of 3 values)")
+        cfg.mask_ephemerides = tuple(
+            (float(v[i]), float(v[i + 1]) - (TIME_ZERO if v[i + 1] > 2.4e6 else 0.0),
+             float(v[i + 2]) / 24.0) for i in range(0, len(v), 3))
     if getattr(args, "sector_max_rms", None) is not None:
         cfg.sector_max_rms = float(args.sector_max_rms)
     if args.detrend_windows:
@@ -8541,8 +9551,23 @@ if __name__ == "__main__":
         cfg.ground_depth_tol = float(args.ground_depth_tol)
     if args.ground_fwhm is not None:
         cfg.ground_fwhm_default = float(args.ground_fwhm)
+    if args.hires_iwa is not None:
+        cfg.hires_iwa = float(args.hires_iwa)
     cfg.tri_plus = args.tri_plus
     if args.exclude_stars:
         cfg.exclude_stars = tuple(int(x) for x in args.exclude_stars)
+    import shlex
+    import sys
+    # Windows: a redirected stdout uses the ANSI code page, which cannot
+    # encode the arrows in the log messages (every sector then "failed")
+    for _s in (sys.stdout, sys.stderr):
+        if hasattr(_s, "reconfigure"):
+            _s.reconfigure(encoding="utf-8", errors="replace")
+    cfg._command_line = shlex.join([os.path.basename(sys.argv[0])] + sys.argv[1:])
+    NET["retries"] = max(int(args.net_retries), 1)
+    cfg.tesscut_retries = NET["retries"]
+    set_network_timeout(args.net_timeout)
+    if args.prefetch_only:
+        raise SystemExit(1 if prefetch_tesscut(cfg)["failed"] else 0)
     main(cfg)
 

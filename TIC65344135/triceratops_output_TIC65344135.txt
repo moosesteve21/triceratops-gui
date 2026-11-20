@@ -4,9 +4,10 @@ Output directory:       /mnt/d/EXPLORE/candidates_dymock/TIC65344135
 TESScut cache directory: /mnt/d/EXPLORE/candidates_dymock/TIC65344135/tesscut_cache
 (existing cutouts for the same TIC/sector/size are reused)
 
-Installed triceratops has no 'dilution_corrected' argument (TRICERATOPS+ or < 1.1): --dilution-mode none is used, so TRICERATOPS receives the light curve on the aperture flux scale and does the dilution correction itself.
+Command line: triceratops_validation.py --tic 65344135 --ephemeris 36.88 4352.3681 3200 5.33 --ephem-scan-hours 16 --dilution-mode none --ld-fit --tri-plus on
 
-Stellar parameters from the TIC:
+VizieR: vizier.cds.unistra.fr not reachable, using the mirror vizier.cfa.harvard.edu
+Stellar parameters (TIC):
   Teff       = 5539.0
   logg       = 4.43546
   metal      = 0.0
@@ -34,7 +35,7 @@ Sectors with FFI coverage: [3, 4, 30, 97, 106, 107, 108]
   sector 107: optimal       11 px  g =  0.557  cadence   3.3 min
   sector 108: optimal       10 px  g =  0.556  cadence   3.3 min
 
-Using the KNOWN ephemeris (no TLS search): P = 36.88 d, T0 = 4352.3681 BTJD, T14 = 5.33 h, depth = 5900 ppm  [check that this belongs to TIC 65344135]
+Using the KNOWN ephemeris (no TLS search): P = 36.88 d, T0 = 4352.3681 BTJD, T14 = 5.33 h, depth = 3200 ppm  [check that this belongs to TIC 65344135]
 
 --- Ephemeris check: box search of every expected transit within +-16.0 h ---
   epoch  -80  predicted 1401.9681  found 1402.0460  ( +1.87 h)  S/N =   13.7  box depth =    2295 ppm
@@ -45,18 +46,18 @@ Using the KNOWN ephemeris (no TLS search): P = 36.88 d, T0 = 4352.3681 BTJD, T14
   epoch   -2  predicted 4278.6081  found 4278.7243  ( +2.79 h)  S/N =    1.0  box depth =     319 ppm
   epoch   -1  predicted 4315.4881  found 4315.4931  ( +0.12 h)  S/N =   16.5  box depth =    2968 ppm
   linear fit of 6 transits (epochs [-80, -60, -11, -10, -3, -1]): P = 36.878950 +/- 0.000139 d, T0 = 4352.36671 BTJD (epoch 0) = 3983.57721 (epoch -10), O-C rms = 12.3 min
-  ! the known ephemeris misses the transits by up to 1.98 h (= 0.37 T14); ADOPTING the refined ephemeris (P 36.880000 -> 36.878950 d, T0 -> 4352.36671). Use --ephem-search off to keep the input values.
+  ! the known ephemeris misses the transits by up to 1.98 h (= 0.37 T14) at the fitted epochs, 1.98 h over all epochs with data; ADOPTING the refined ephemeris (P 36.880000 -> 36.878950 d, T0 -> 4352.36671). Use --ephem-search off to keep the input values.
 
-  shape for the per-transit fits (trapezoid on the fold): T14 = 4.79 h, depth = 2794 ppm, T0 shift = +11.5 min
+  shape for the per-transit fits (trapezoid on the fold): T14 = 4.90 h, depth = 2780 ppm, T0 shift = +12.6 min
 
 --- Per-transit depths (7 usable transits) ---
-  epoch  -80  Tc = 1402.05074  dTc =  +37.1 min  depth =     2691 +/-    320 ppm  snr =   8.4  (34 pts)
-  epoch  -60  Tc = 2139.62973  dTc =  +31.8 min  depth =     2210 +/-    309 ppm  snr =   7.2  (99 pts)
-  epoch  -11  Tc = 3946.69827  dTc =  +14.9 min  depth =     3596 +/-    361 ppm  snr =  10.0  (224 pts)
-  epoch  -10  Tc = 3983.57721  dTc =  +10.0 min  depth =     3128 +/-    269 ppm  snr =  11.6  (302 pts)
-  epoch   -3  Tc = 4241.72986  dTc =   -0.1 min  depth =     2862 +/-    265 ppm  snr =  10.8  (302 pts)
-  epoch   -2  Tc = 4278.60881  dTc =  -68.0 min  depth =     4474 +/-   1727 ppm  snr =   2.6  (169 pts)
-  epoch   -1  Tc = 4315.48776  dTc =   +9.0 min  depth =     2624 +/-    248 ppm  snr =  10.6  (302 pts)
+  epoch  -80  Tc = 1402.05074  dTc =  +40.5 min  depth =     2720 +/-    316 ppm  snr =   8.6  (34 pts)
+  epoch  -60  Tc = 2139.62973  dTc =  +29.2 min  depth =     2217 +/-    305 ppm  snr =   7.3  (101 pts)
+  epoch  -11  Tc = 3946.69827  dTc =  +17.8 min  depth =     3631 +/-    368 ppm  snr =   9.9  (228 pts)
+  epoch  -10  Tc = 3983.57721  dTc =  +10.6 min  depth =     3082 +/-    268 ppm  snr =  11.5  (309 pts)
+  epoch   -3  Tc = 4241.72986  dTc =   -3.4 min  depth =     2860 +/-    264 ppm  snr =  10.8  (309 pts)
+  epoch   -2  Tc = 4278.60881  dTc =  -78.9 min  depth =     5029 +/-   1820 ppm  snr =   2.8  (172 pts)
+  epoch   -1  Tc = 4315.48776  dTc =  +10.8 min  depth =     2621 +/-    247 ppm  snr =  10.6  (308 pts)
   epochs not usable (73):
     epoch  -79  Tc = 1438.930  no data
     epoch  -78  Tc = 1475.809  no data
@@ -131,27 +132,27 @@ Using the KNOWN ephemeris (no TLS search): P = 36.88 d, T0 = 4352.3681 BTJD, T14
     epoch   -6  Tc = 4131.093  no data
     epoch   -5  Tc = 4167.972  no data
     epoch   -4  Tc = 4204.851  no data
-  linear ephemeris from 6 transits: P = 36.87868 +/- 0.00006 d, T0 = 4352.37156 +/- 0.00225; O-C rms = 3.8 min, chi2_red = 0.32
-  adopted refined ephemeris: P 36.87895 -> 36.87868, T0 4352.36671 -> 4352.37156
-  after refinement: 7 usable transits, mean |dTc| = 13.1 min
-  weighted mean depth = 2825 +/- 117 ppm
-  constant-depth chi2/dof = 1.91 (6 dof)
-  odd/even difference = 0.76 sigma
-  depth at phase 0.5 (P/2 and secondary-eclipse test): 163 +/- 169 ppm from 3 epochs (1.0 sigma)
-    primary 2825 +/- 117 ppm vs phase 0.5 163 +/- 169 ppm: difference -12.9 sigma
-  adopted depth = weighted per-transit mean (2825 ppm, chi2_red = 1.91)
+  linear ephemeris from 6 transits: P = 36.87869 +/- 0.00009 d, T0 = 4352.37263 +/- 0.00288; O-C rms = 5.8 min, chi2_red = 0.24
+  adopted refined ephemeris: P 36.87895 -> 36.87869, T0 4352.36671 -> 4352.37263
+  after refinement: 7 usable transits, mean |dTc| = 15.7 min
+  weighted mean depth = 2820 +/- 116 ppm
+  constant-depth chi2/dof = 1.92 (6 dof)
+  odd/even difference = 0.86 sigma
+  depth at phase 0.5 (P/2 and secondary-eclipse test): 158 +/- 168 ppm from 3 epochs (0.9 sigma)
+    primary 2820 +/- 116 ppm vs phase 0.5 158 +/- 168 ppm: difference -13.0 sigma
+  adopted depth = weighted per-transit mean (2820 ppm, chi2_red = 1.92)
 
 --- Secondary-eclipse search at all phases (widths [0.5, 0.75, 1.0, 1.5, 2.0] x T14 = 5.33 h; first-pass light curve) ---
-  phase coverage 98 %; S/N over phases: median 1.3, scatter 2.1
-  candidate phase 0.3430  width 2.00 T14  depth   2107 ppm  S/N  16.2  (3 events; without the strongest, epoch -2: S/N 0.5; inflated by the event scatter: S/N 0.6)  rejected: carried by one event; event depths inconsistent (chi2_red 733.6; S/N with scatter-inflated errors 0.6)
-  candidate phase 0.3493  width 2.00 T14  depth   1010 ppm  S/N   6.9  (3 events; without the strongest, epoch -2: S/N 2.2; inflated by the event scatter: S/N 0.7)  rejected: not significant; carried by one event; event depths inconsistent (chi2_red 102.6; S/N with scatter-inflated errors 0.7)
-  candidate phase 0.0238  width 1.00 T14  depth    145 ppm  S/N   1.4  (6 events; without the strongest, epoch -3: S/N 0.2; inflated by the event scatter: S/N 1.1)  rejected: not significant; carried by one event; event depths inconsistent (chi2_red 1.7; S/N with scatter-inflated errors 1.1)
-  candidate phase 0.6582  width 1.00 T14  depth    -90 ppm  S/N  -0.9  (6 events; without the strongest, epoch -80: S/N -1.8; inflated by the event scatter: S/N -0.6)  rejected: not significant; carried by one event; event depths inconsistent (chi2_red 1.8; S/N with scatter-inflated errors -0.6); dip in only 17 % of the events
-  candidate phase 0.3366  width 2.00 T14  depth    582 ppm  S/N   4.6  (3 events; without the strongest, epoch -2: S/N -0.2; inflated by the event scatter: S/N 0.4)  rejected: not significant; carried by one event; event depths inconsistent (chi2_red 145.1; S/N with scatter-inflated errors 0.4)
-  no coherent secondary eclipse; 3-sigma depth limit (width T14): 450 ppm median over phases, 469 ppm at phase 0.5, 3592 ppm worst case (note: an eccentric, inclined orbit can avoid a secondary eclipse altogether)
-  surface-brightness ratio 0.159 (secondary / primary depth, 800 nm) -> companion brightness temperature < 3561 K (primary 5539 K; assumes equal occulted areas). A self-luminous M dwarf has T ~ 2800-3500 K.
+  phase coverage 98 %; S/N over phases: median 1.3, scatter 2.0
+  candidate phase 0.3433  width 2.00 T14  depth   2226 ppm  S/N  17.0  (3 events; without the strongest, epoch -2: S/N 0.6; inflated by the event scatter: S/N 0.6)  rejected: carried by one event; event depths inconsistent (chi2_red 773.1; S/N with scatter-inflated errors 0.6)
+  candidate phase 0.3496  width 2.00 T14  depth    936 ppm  S/N   6.4  (3 events; without the strongest, epoch -2: S/N 2.3; inflated by the event scatter: S/N 0.7)  rejected: not significant; carried by one event; event depths inconsistent (chi2_red 80.4; S/N with scatter-inflated errors 0.7)
+  candidate phase 0.3372  width 2.00 T14  depth    661 ppm  S/N   5.3  (3 events; without the strongest, epoch -2: S/N -0.4; inflated by the event scatter: S/N 0.4)  rejected: not significant; carried by one event; event depths inconsistent (chi2_red 189.2; S/N with scatter-inflated errors 0.4); dip in only 33 % of the events
+  candidate phase 0.0238  width 1.00 T14  depth    152 ppm  S/N   1.5  (6 events; without the strongest, epoch -3: S/N 0.3; inflated by the event scatter: S/N 1.1)  rejected: not significant; carried by one event; event depths inconsistent (chi2_red 1.7; S/N with scatter-inflated errors 1.1)
+  candidate phase 0.6588  width 0.75 T14  depth    -97 ppm  S/N  -0.8  (6 events; without the strongest, epoch -80: S/N -2.3; inflated by the event scatter: S/N -0.4)  rejected: not significant; carried by one event; event depths inconsistent (chi2_red 3.5; S/N with scatter-inflated errors -0.4); dip in only 33 % of the events
+  no coherent secondary eclipse; 3-sigma depth limit (width T14): 450 ppm median over phases, 469 ppm at phase 0.5, 3591 ppm worst case (note: an eccentric, inclined orbit can avoid a secondary eclipse altogether)
+  surface-brightness ratio 0.16 (secondary / primary depth, 800 nm) -> companion brightness temperature < 3562 K (primary 5539 K; assumes equal occulted areas). A self-luminous M dwarf has T ~ 2800-3500 K.
 
-Adopted ephemeris: P = 36.878680 d, T0 = 4352.37156, T14 = 5.33 h, depth = 2825 ppm
+Adopted ephemeris: P = 36.878692 d, T0 = 4352.37263, T14 = 5.33 h, depth = 2820 ppm
 
 --- In-transit centroid offsets (flux-weighted centroid of the aperture; formal errors only - for the location of the signal use the difference imaging below) ---
  sector        dx        dy   offset     sigma
@@ -159,68 +160,70 @@ Adopted ephemeris: P = 36.878680 d, T0 = 4352.37156, T14 = 5.33 h, depth = 2825 
      30 -0.010412 -0.022909 0.025164  3.610567
      97 -0.005293 -0.006851 0.008657  2.701652
     106 -0.004518  0.007045 0.008369  2.761933
-    107  0.034177  0.106795 0.112131 47.426104
-    108  0.006796 -0.002146 0.007127  5.035576
+    107  0.034100  0.106415 0.111745 47.620059
+    108  0.006779 -0.002132 0.007107  5.022804
 
 --- Limb-darkened transit fit of the folded LC (LD mode: claret) ---
   smoothing box (bin + native cadence): 12.2 min,  160 bins,  5 free parameters
-  rp   = 0.05063 +/- 0.00365
-  b    = 0.00135 +/- 272.58953
-  aRs  = 53.95475 +/- 19.80472
-  t0s  = 0.00092 +/- 0.00210
-  f0   = 1.00002 +/- 0.00006
+  rp   = 0.05044 +/- 0.00113
+  b    = 0.00000 +/- 0.00000
+  aRs  = 53.69004 +/- 1.05283
+  t0s  = 0.00096 +/- 0.00203
+  f0   = 1.00003 +/- 0.00005
   u1, u2 = 0.386, 0.206  (fixed)
-  Rp/Rs = 0.0506,  b = 0.001,  a/Rs = 53.955,  i = 90.00 deg
-  depth = 3059 ppm,  T14 = 5.486 h,  T23 = 4.958 h
-  rho_star (circular orbit) = 2.185 g/cm^3
+  Rp/Rs = 0.0504,  b = 0.000,  a/Rs = 53.690,  i = 90.00 deg
+  depth = 3037 ppm,  T14 = 5.512 h,  T23 = 4.983 h
+  rho_star (circular orbit) = 2.153 g/cm^3
   rho_star from TIC mass/radius       = 1.419 g/cm^3   (consistency check)
-  residual rms = 636 ppm  (OOT bin scatter 644 ppm, chi2_red vs that = 1.01)
+  residual rms = 601 ppm  (OOT bin scatter 613 ppm, chi2_red vs that = 0.99)
 
-  updating adopted depth from LD fit: 2825 -> 3059 ppm
-  updating adopted T14 from LD fit: 5.33 -> 5.49 h
-  adopted for TRICERATOPS: depth = 3059 ppm, T14 = 5.49 h
+  adopted depth NOT updated from the LD fit (2820 ppm kept, LD fit 3037 ppm): b stuck at the b = 0 limit (b = 0.0000 +/- 2.7e-06)
+  updating adopted T14 from LD fit: 5.33 -> 5.51 h
+  adopted for TRICERATOPS: depth = 2820 ppm, T14 = 5.51 h
 
 --- Flux uncertainty for TRICERATOPS ---
   n_bins_used                  160
-  sigma_point_ppm              1884
-  sigma_white_bin_ppm          503.6
-  sigma_empirical_bin_ppm      668
+  sigma_point_ppm              1887
+  sigma_white_bin_ppm          504.2
+  sigma_empirical_bin_ppm      615.1
   floor_ppm                    0
-  sigma_lightkurve_mean_ppm    581.9
-  chi2_red_model               0.9355
+  sigma_lightkurve_mean_ppm    573.5
+  chi2_red_model               0.9843
   inflation                    1
   reference_model              limb-darkened fit
-  sigma_used_ppm               668
+  sigma_used_ppm               615.1
 
 --- Per-transit depths with the limb-darkened shape (smoothed with each sector's cadence; 7 transits) ---
-  epoch  -80  Tc = 1402.07716  dTc =   -0.3 +/-  9.7 min  depth =     2778 +/-    317 ppm
-  epoch  -60  Tc = 2139.65076  dTc =   +5.8 +/-  5.3 min  depth =     2439 +/-    301 ppm
-  epoch  -11  Tc = 3946.70608  dTc =   +1.7 +/-  3.6 min  depth =     3845 +/-    359 ppm
-  epoch  -10  Tc = 3983.58476  dTc =   +3.4 +/-  5.5 min  depth =     3201 +/-    271 ppm
-  epoch   -3  Tc = 4241.73552  dTc =   -9.2 +/-  5.3 min  depth =     3024 +/-    267 ppm
-  epoch   -2  Tc = 4278.61420  dTc =  -24.4 +/-  8.8 min  depth =     4074 +/-   1410 ppm
-  epoch   -1  Tc = 4315.49288  dTc =   +0.4 +/-  5.0 min  depth =     2742 +/-    251 ppm
+  epoch  -80  Tc = 1402.07725  dTc =   -0.2 +/-  9.8 min  depth =     2778 +/-    315 ppm
+  epoch  -60  Tc = 2139.65110  dTc =   +5.1 +/-  5.6 min  depth =     2431 +/-    301 ppm
+  epoch  -11  Tc = 3946.70701  dTc =   +0.3 +/-  3.7 min  depth =     3853 +/-    361 ppm
+  epoch  -10  Tc = 3983.58571  dTc =   +1.4 +/-  4.9 min  depth =     3196 +/-    270 ppm
+  epoch   -3  Tc = 4241.73655  dTc =  -10.9 +/-  5.5 min  depth =     3013 +/-    266 ppm
+  epoch   -2  Tc = 4278.61524  dTc =  -26.3 +/-  9.4 min  depth =     4016 +/-   1401 ppm
+  epoch   -1  Tc = 4315.49394  dTc =   -1.2 +/-  4.5 min  depth =     2751 +/-    251 ppm
 
 --- Per-transit depths per sector (raw aperture depths divided by g_s) ---
   epoch  sector  cadence    aperture        g_s    on-target depth
-    -80       3   30.0 min  optimal        0.557      4986 +/-   568 ppm
-    -60      30   10.0 min  optimal        0.556      4386 +/-   541 ppm
-    -11      97    3.3 min  optimal        0.559      6881 +/-   643 ppm
-    -10      97    3.3 min  optimal        0.559      5729 +/-   484 ppm
-     -3     106    3.3 min  optimal        0.561      5390 +/-   475 ppm
-     -2     107    3.3 min  optimal        0.557      7311 +/-  2531 ppm
-     -1     108    3.3 min  optimal        0.556      4936 +/-   453 ppm
-  weighted mean on-target depth = 5322 +/- 210 ppm
+    -80       3   30.0 min  optimal        0.557      4986 +/-   565 ppm
+    -60      30   10.0 min  optimal        0.556      4370 +/-   541 ppm
+    -11      97    3.3 min  optimal        0.559      6895 +/-   646 ppm
+    -10      97    3.3 min  optimal        0.559      5721 +/-   484 ppm
+     -3     106    3.3 min  optimal        0.561      5370 +/-   474 ppm
+     -2     107    3.3 min  optimal        0.557      7208 +/-  2514 ppm
+     -1     108    3.3 min  optimal        0.556      4952 +/-   452 ppm
+  weighted mean on-target depth = 5317 +/- 210 ppm
   constant-depth chi2/dof = 1.88
-  odd/even difference (all cadences) = 0.92 sigma
-  cadence   3.3 min: odd    5509 +/-   292 ppm (3), even    5785 +/-   476 ppm (2): -0.49 sigma
+  odd/even difference (all cadences) = 0.94 sigma
+  cadence   3.3 min: odd    5508 +/-   292 ppm (3), even    5774 +/-   475 ppm (2): -0.48 sigma
+  transits within 0.5 d of a data-segment edge: epoch -2 (1.4 h)
+  without them (6 transits): constant-depth chi2/dof = 2.15, odd/even difference = 1.01 sigma
 
 --- Eclipse timing variations (7 mid-times) ---
-  linear ephemeris: P = 36.878595 +/- 0.000087 d; O-C rms = 9.4 min, chi2_red = 2.06
-  odd - even mid-times: +2.59 +/- 4.18 min (+0.6 sigma); if the true period is 2P (73.7574 d) this gives e cos(w) = +3.8e-05 +/- 6.2e-05
-  quadratic ephemeris: dP/dE = -1.147 +/- 0.982 s per cycle (-1.2 sigma); delta chi2 vs linear = 2.6
-  light-travel-time search (outer period 111-8740 d): best P_out = 123 d, amplitude 17.1 +/- 4.6 min, delta chi2 = 9.8 (4 extra parameters: not significant below ~15)
-  3-sigma limit on an LTTE amplitude for P_out <= 2913 d (median over periods): 33.3 min, i.e. a12 sin(i) < 4.00 AU
+  linear ephemeris: P = 36.878601 +/- 0.000086 d; O-C rms = 9.6 min, chi2_red = 1.94
+  odd - even mid-times: +1.79 +/- 6.29 min (+0.3 sigma); if the true period is 2P (73.7574 d) this gives e cos(w) = +2.7e-05 +/- 9.3e-05
+  quadratic ephemeris: dP/dE = -1.028 +/- 0.963 s per cycle (-1.1 sigma); delta chi2 vs linear = 1.1
+  light-travel-time search (outer period 111-8740 d): best P_out = 123 d, amplitude 17.3 +/- 4.7 min, delta chi2 = 9.3 (4 extra parameters: not significant below ~15)
+  3-sigma limit on an LTTE amplitude for P_out <= 2913 d (median over periods): 32.3 min, i.e. a12 sin(i) < 3.88 AU
   eclipse-depth trend: +61 +/- 53 ppm/yr (+1.2 sigma, errors scaled by the scatter); a significant trend in a grazing eclipse points to a changing inclination (third body) - or to a changing aperture dilution
 
   aperture photometry is not crowding-corrected: dilution_corrected = False for calc_depths / calc_probs (override with --dilution-corrected)
@@ -229,13 +232,13 @@ Adopted ephemeris: P = 36.878680 d, T0 = 4352.37156, T14 = 5.33 h, depth = 2825 
 --- Difference-image centroids ---
  sector  n_epochs       snr   x_diff   y_diff  sigma_stat_pix  sigma_pix  sigma_arcsec  offset_cat_arcsec  offset_cat_sigma  offset_direct_pix  offset_direct_arcsec  offset_direct_sigma
       3         1  7.691545 5.189922 4.503816        0.198494   0.222261      4.349580           6.515890          1.498050           0.438383              8.579010             1.972376
-     30         1 10.875673 5.363504 5.136610        0.187908   0.212860      4.284200           3.530438          0.824060           0.292804              5.893215             1.375570
-     97         2  3.520251 4.808875 4.890355        1.104570   1.109087     23.037698           4.705577          0.204256           0.151555              3.148054             0.136648
-    106         1 17.820597 5.159970 4.747330        0.092430   0.136174      2.710141           2.512294          0.926998           0.070519              1.403465             0.517857
-    107         1  0.006570 4.916606 5.046710        2.999104   3.000771     62.252943          12.173758          0.195553           0.710307             14.735786             0.236708
-    108         1 17.942187 4.943869 5.090508        0.107863   0.147087      2.940920           3.916951          1.331879           0.129543              2.590137             0.880723
+     30         1 10.704937 5.381053 5.143870        0.190499   0.215150      4.330292           3.804672          0.878618           0.299834              6.034710             1.393603
+     97         2  3.659820 4.812422 4.896907        1.063084   1.067777     22.179616           4.652717          0.209774           0.144859              3.008971             0.135664
+    106         1 18.305736 5.154644 4.758001        0.090993   0.135202      2.690804           2.673023          0.993392           0.080000              1.592167             0.591707
+    107         1  0.006590 4.911463 5.048161        2.998762   3.000429     62.245856          12.244144          0.196706           0.712634             14.784046             0.237511
+    108         1 18.027529 4.950200 5.093141        0.107796   0.147037      2.939932           3.943239          1.341269           0.124709              2.493490             0.848145
   (centroid errors include a systematic floor of 0.10 px in quadrature)
-  difference-image centroid vs target (direct-image PRF): median 0.9 sigma over 5 sectors with S/N >= 3; consistent with the target
+  difference-image centroid vs target (direct-image PRF): median 0.8 sigma over 5 sectors with S/N >= 3; consistent with the target
   stars excluded by difference imaging: 44 (first: [65344121, 65344122, 65344128, 65344131, 65344136, 65344138, 65344139, 65344145])
   44 excluded star(s) have tdepth = 0 (cannot host the signal); not passed to remove_star
 triceratops version: 1.0.17
@@ -243,8 +246,8 @@ triceratops version: 1.0.17
 
 Stars in the field used for the calculation:
              ID    Bmag     Vmag     Tmag    Jmag    Hmag    Kmag  gmag  rmag  imag  zmag         ra        dec      mass       rad    Teff         d       plx  sep (arcsec)  PA (E of N)     fluxratio    tdepth
-0      65344135  13.170  12.9830  12.3302  11.636  11.340  11.296   NaN   NaN   NaN   NaN  39.307134 -26.314592  0.970000  0.987852  5539.0   373.116  2.651520         0.000        0.000  5.579152e-01  0.005483
-1      65344134  12.007  13.1710  12.5621  11.853  11.532  11.424   NaN   NaN   NaN   NaN  39.308641 -26.315503  0.940000  0.914508  5391.0   365.486  2.707320         5.864      123.991  4.411513e-01  0.006934
+0      65344135  13.170  12.9830  12.3302  11.636  11.340  11.296   NaN   NaN   NaN   NaN  39.307134 -26.314592  0.970000  0.987852  5539.0   373.116  2.651520         0.000        0.000  5.579152e-01  0.005055
+1      65344134  12.007  13.1710  12.5621  11.853  11.532  11.424   NaN   NaN   NaN   NaN  39.308641 -26.315503  0.940000  0.914508  5391.0   365.486  2.707320         5.864      123.991  4.411513e-01  0.006393
 2     632342902     NaN  19.9536  19.2170     NaN     NaN     NaN   NaN   NaN   NaN   NaN  39.308025 -26.309928       NaN       NaN     NaN   946.706  0.758283        17.037        9.717  8.381230e-04  0.000000
 3      65344129  18.147  20.3150  19.1693  16.425  15.691  15.183   NaN   NaN   NaN   NaN  39.305542 -26.332097       NaN       NaN     NaN       NaN       NaN        63.227      184.661  7.299752e-05  0.000000
 4      65344961  16.565      NaN  17.2510  16.751  16.073  15.293   NaN   NaN   NaN   NaN  39.326263 -26.329947       NaN       NaN     NaN       NaN       NaN        82.857      131.851  1.126732e-05  0.000000
@@ -293,123 +296,184 @@ Stars in the field used for the calculation:
 47     65344944  19.879  19.0396  17.4338  16.197  15.532  15.409   NaN   NaN   NaN   NaN  39.323427 -26.260783  0.455414  0.458334  3896.0   794.824  1.222130       200.724       15.192  7.840265e-28  0.000000
 
 --- NFPP input: which neighbours can produce the signal ---
-  depth adopted for calc_depths      : 3059 ppm  (target flux ratio 0.5579)
-  dip in the aperture light curve    : 3059 ppm
-  min. neighbour flux ratio needed   : 3.06e-03  (a 100 % eclipse of a star with less flux cannot do it)
+  depth adopted for calc_depths      : 2820 ppm  (target flux ratio 0.5579)
+  dip in the aperture light curve    : 2820 ppm
+  min. neighbour flux ratio needed   : 2.82e-03  (a 100 % eclipse of a star with less flux cannot do it)
   neighbours in table / still used   : 47 / 1
   brightest neighbour                : TIC 65344134, Tmag 12.56, sep 5.9 arcsec, flux ratio 4.41e-01
     -> would need an eclipse of 1 % of its own flux (possible)
   neighbours that can host the signal:
       ID    Tmag  sep (arcsec)  fluxratio   tdepth
-65344134 12.5621         5.864   0.441151 0.006934
+65344134 12.5621         5.864   0.441151 0.006393
 
-flux uncertainty passed to calc_probs: 668 ppm;  N = triceratops default;  model exposure 12.2 min (20 sub-samples)
+flux uncertainty passed to calc_probs: 615 ppm;  N = triceratops default;  model exposure 12.2 min (20 sub-samples)
 
 Scenario probabilities (last iteration):
-          ID scenario       M_s       R_s     P_orb        inc         b       ecc           w        R_p      M_EB      R_EB    M_comp    R_comp  flux_ratio_comp_T          prob         lnZ
-0   65344135       TP  0.970000  0.987852  36.87868  89.735530  0.225565  0.132294  332.717234   7.366212  0.000000  0.000000  0.000000  0.000000           0.000000  3.634054e-01  570.744506
-1   65344135       EB  0.970000  0.987852  36.87868  89.115612  0.397023  0.573407  151.449995   0.000000  0.136987  0.167276  0.000000  0.000000           0.000000  3.990878e-31  501.760616
-2   65344135    EBx2P  0.970000  0.987852  73.75736  89.225165  0.779161  0.727102  199.429323   0.000000  0.922770  0.967975  0.000000  0.000000           0.000000  5.354672e-09  552.711446
-3   65344135      PTP  0.970000  0.987852  36.87868  89.976690  0.027040  0.431521  277.375563   7.407232  0.000000  0.000000  0.369007  0.375875           0.019290  1.743713e-01  570.010174
-4   65344135      PEB  0.970000  0.987852  36.87868  89.167342  0.552624  0.416584  170.469845   0.000000  0.161753  0.193732  0.913296  0.955032           0.435401  1.803395e-21  523.992126
-5   65344135   PEBx2P  0.970000  0.987852  73.75736  89.194297  1.064316  0.433299  180.692612   0.000000  0.923804  0.969404  0.598916  0.595646           0.079601  8.599557e-12  546.277432
-6   65344135      STP  0.839242  0.865943  36.87868  89.951136  0.037389  0.154215   58.090473  10.885188  0.000000  0.000000  0.970000  0.987852           0.355463  1.541630e-02  567.584413
-7   65344135      SEB  0.773956  0.802621  36.87868  89.908085  0.088829  0.001557  232.139602   0.000000  0.088908  0.103429  0.970000  0.987852           0.281042  1.021586e-02  567.172928
-8   65344135   SEBx2P  0.582083  0.586420  73.75736  89.474058  0.927954  0.363647  157.426906   0.000000  0.581773  0.586212  0.970000  0.987852           0.068903  1.085331e-08  553.417946
-9   65344135      DTP  0.970000  0.987852  36.87868  89.577767  0.376146  0.143972  313.967921   7.454073  0.000000  0.000000  0.804000  0.000000           0.003948  1.095295e-01  569.545181
-10  65344135      DEB  0.970000  0.987852  36.87868  89.160789  0.649282  0.499004  200.714421   0.000000  0.122412  0.149949  0.281000  0.000000           0.000420  2.739010e-27  510.594541
-11  65344135   DEBx2P  0.970000  0.987852  73.75736  88.698511  0.793428  0.890726  210.304170   0.000000  0.947723  0.987852  0.305000  0.000000           0.000492  2.474589e-13  542.729210
-12  65344135      BTP  1.133000  1.219407  36.87868  89.127173  0.565647  0.278952  357.934356  14.960241  0.000000  0.000000  0.970000  0.987852           0.417903  5.340745e-05  561.919182
-13  65344135      BEB  0.949000  0.889543  36.87868  89.496118  0.620740  0.620066  239.553651   0.000000  0.106918  0.129720  0.970000  0.987852           0.193933  3.798352e-06  559.275799
-14  65344135   BEBx2P  0.924000  1.559085  73.75736  88.031313  0.646525  0.678340   77.229416   0.000000  0.892564  0.927733  0.970000  0.987852           0.036020  1.235039e-08  553.547164
-15  65344134      NTP  0.940000  0.914508  36.87868  89.678033  0.259856  0.093278   49.207276   7.771178  0.000000  0.000000  0.000000  0.000000           0.000000  3.270042e-01  570.638960
-16  65344134      NEB  0.940000  0.914508  36.87868  88.920630  0.198661  0.928945  200.475918   0.000000  0.117349  0.143560  0.000000  0.000000           0.000000  8.037429e-12  546.209830
-17  65344134   NEBx2P  0.940000  0.914508  73.75736  89.205249  0.511591  0.715117  153.317153   0.000000  0.930994  0.914508  0.000000  0.000000           0.000000  6.325990e-08  555.180728
+          ID scenario       M_s       R_s      P_orb        inc         b       ecc           w        R_p      M_EB      R_EB    M_comp    R_comp  flux_ratio_comp_T          prob         lnZ
+0   65344135       TP  0.970000  0.987852  36.878692  89.938374  0.046033  0.157443   24.229866   7.309804  0.000000  0.000000  0.000000  0.000000           0.000000  4.467837e-01  567.103215
+1   65344135       EB  0.970000  0.987852  36.878692  89.341928  0.086354  0.923142  182.819653   0.000000  0.118896  0.145534  0.000000  0.000000           0.000000  1.305803e-31  496.795576
+2   65344135    EBx2P  0.970000  0.987852  73.757384  89.300511  0.616853  0.670754  178.603635   0.000000  0.964552  0.987852  0.000000  0.000000           0.000000  3.331684e-14  536.876182
+3   65344135      PTP  0.970000  0.987852  36.878692  89.658244  0.342360  0.253934  290.089864   7.218861  0.000000  0.000000  0.204280  0.233894           0.005357  9.144427e-02  565.516870
+4   65344135      PEB  0.970000  0.987852  36.878692  89.237744  0.367969  0.534205  152.400578   0.000000  0.100592  0.120850  0.931760  0.980483           0.456118  1.432862e-12  540.637549
+5   65344135   PEBx2P  0.970000  0.987852  73.757384  89.224217  1.003222  0.570457  195.592074   0.000000  0.942369  0.987852  0.147494  0.178902           0.002184  3.724474e-08  550.803141
+6   65344135      STP  0.924772  0.970744  36.878692  89.771209  0.187238  0.140849  351.082260  10.842954  0.000000  0.000000  0.970000  0.987852           0.448231  2.479153e-02  564.211643
+7   65344135      SEB  0.803098  0.829977  36.878692  89.469088  0.679614  0.623635  241.898533   0.000000  0.084969  0.100000  0.970000  0.987852           0.315301  5.371997e-03  562.682340
+8   65344135   SEBx2P  0.547422  0.556505  73.757384  89.514577  1.061723  0.307051  181.942675   0.000000  0.543833  0.552788  0.970000  0.987852           0.052555  1.880544e-08  550.119776
+9   65344135      DTP  0.970000  0.987852  36.878692  89.686473  0.194228  0.247235   72.547357   7.200028  0.000000  0.000000  0.662000  0.000000           0.000450  5.691501e-02  565.042700
+10  65344135      DEB  0.970000  0.987852  36.878692  89.247224  0.424239  0.614268  185.847106   0.000000  0.122631  0.150220  0.564000  0.000000           0.000423  8.751338e-13  540.144496
+11  65344135   DEBx2P  0.970000  0.987852  73.757384  89.174046  0.972507  0.434085  163.537855   0.000000  0.964413  0.987852  0.727000  0.000000           0.001815  2.984241e-13  539.068635
+12  65344135      BTP  1.238000  1.320974  36.878692  89.624989  0.244853  0.286009  345.877877  18.698317  0.000000  0.000000  0.970000  0.987852           0.228390  8.561135e-08  551.635448
+13  65344135      BEB  1.384000  1.894968  36.878692  88.277569  0.801125  0.368316  347.764980   0.000000  0.158547  0.190481  0.970000  0.987852           0.425990  3.127580e-07  552.931060
+14  65344135   BEBx2P  1.114000  1.231619  73.757384  88.828295  1.684896  0.062213  242.056117   0.000000  1.087062  1.202778  0.970000  0.987852           0.095437  1.362558e-09  547.494994
+15  65344134      NTP  0.940000  0.914508  36.878692  89.581960  0.448013  0.230050  266.819035   7.643087  0.000000  0.000000  0.000000  0.000000           0.000000  3.746930e-01  566.927248
+16  65344134      NEB  0.940000  0.914508  36.878692  89.276134  0.398096  0.707835  194.277821   0.000000  0.128836  0.157772  0.000000  0.000000           0.000000  5.342583e-13  539.650999
+17  65344134   NEBx2P  0.940000  0.914508  73.757384  89.183786  0.619887  0.648505  149.809221   0.000000  0.923361  0.914508  0.000000  0.000000           0.000000  2.411575e-09  548.065910
 
-lnZ per scenario (last iteration): [570.7 501.8 552.7 570.  524.  546.3 567.6 567.2 553.4 569.5 510.6 542.7 561.9 559.3 553.5 570.6
- 546.2 555.2]
+lnZ per scenario (last iteration): [567.1 496.8 536.9 565.5 540.6 550.8 564.2 562.7 550.1 565.  540.1 539.1 551.6 552.9 547.5 566.9
+ 539.7 548.1]
 
-valid runs: 20/20; final sigma = 668 ppm
-FPP  (mean of per-run values) = 0.39148 +/- 0.05668   [run-to-run scatter]
-NFPP (mean of per-run values) = 0.37757 +/- 0.05799
+valid runs: 20/20; final sigma = 615 ppm
+FPP  (mean of per-run values) = 0.37374 +/- 0.07320   [run-to-run scatter]
+NFPP (mean of per-run values) = 0.35318 +/- 0.07223
 
-Pooled evidences of 20 runs at sigma = 668 ppm (= one run with 20 x N draws):
-FPP  = 0.38941 +/- 0.01364   [bootstrap over runs]
-NFPP = 0.37566 +/- 0.01390
-  most probable scenarios (index: prob, lnZ): 0: 0.429, 571.1, 15: 0.376, 570.9, 3: 0.115, 569.8, 9: 0.066, 569.2
-  largest share of a single run in the leading scenario's evidence: 0.07 (1/n_runs = 0.05 when converged)
+Pooled evidences of 20 runs at sigma = 615 ppm (= one run with 20 x N draws):
+FPP  = 0.37286 +/- 0.01620   [bootstrap over runs]
+NFPP = 0.35267 +/- 0.01622
+  most probable scenarios (index: prob, lnZ): 0: 0.451, 567.1, 15: 0.353, 566.8, 3: 0.112, 565.7, 9: 0.064, 565.1
+  largest share of a single run in the leading scenario's evidence: 0.08 (1/n_runs = 0.05 when converged)
   probability per class of explanation (pooled):
-      0.6106  planet on the target or an unresolved companion (TP, PTP, DTP)
-      0.0136  eclipsing binary on the target / bound companion (EB, EBx2P, PEB, PEBx2P, SEB, SEBx2P, STP)
-      0.0002  unresolved background / foreground star (DEB, DEBx2P, BTP, BEB, BEBx2P)
-      0.3757  resolved nearby star (NTP, NEB, NEBx2P)
+      0.6271  planet on the target or an unresolved companion (TP, PTP, DTP)
+      0.0197  eclipsing binary on the target / bound companion (EB, EBx2P, PEB, PEBx2P, SEB, SEBx2P, STP)
+      0.0005  unresolved background / foreground star (DEB, DEBx2P, BTP, BEB, BEBx2P)
+      0.3527  resolved nearby star (NTP, NEB, NEBx2P)
 Giacalone+2021 validation criteria (FPP < 0.015 and NFPP < 0.001; based on pooled evidences): NOT passed
+
+--- Next observations: what each kind of follow-up can remove (scenario probabilities above; best case and typical) ---
+  FPP = 0.3729, NFPP = 0.3527 now (criteria: FPP < 0.015, NFPP < 0.001)
+  1. Ground photometry, separate apertures on the target and each nearby star
+     addresses NEB (TIC 65344134), NEBx2P (TIC 65344134), NTP (TIC 65344134): P = 0.3527 of the total
+     if all of these are ruled out: FPP = 0.0312, NFPP = 0.0000 -> not enough by itself
+       - TIC 65344134: 5.9" , Tmag 12.56, P(signal on it) = 0.353, it would have to dim by 6393 ppm
+     how: one transit, seeing <= 3"; the star that shows the dip is the host (on the target: 5055 ppm); feed the light curves back with --ground-lc
+  2. High-resolution imaging (speckle / adaptive optics)
+     addresses BEB, BEBx2P, BTP, DEB, DEBx2P, PEB, PEBx2P, SEB, SEBx2P, STP: P = 0.0202 of the total
+     if all of these are ruled out: FPP = 0.3599, NFPP = 0.3599 -> not enough by itself
+     typical outcome: FPP = 0.3659, NFPP = 0.3566
+       - PEB: best-fit companion 0.93 Msun, 46 % of the TESS light (contrast ~0.2 mag)
+       - PEBx2P: best-fit companion 0.15 Msun, 0 % of the TESS light (contrast ~6.6 mag)
+       - STP: best-fit companion 0.92 Msun, 45 % of the TESS light (contrast ~0.2 mag)
+       - SEB: best-fit companion 0.80 Msun, 32 % of the TESS light (contrast ~0.8 mag)
+       - SEBx2P: best-fit companion 0.55 Msun, 5 % of the TESS light (contrast ~3.1 mag)
+       - typically 53 % of bound companions lie outside 0.1" (separation distribution of Raghavan et al. 2010); background stars: ~95 %
+     how: rules out companions and background stars outside ~0.1" = 37 au at 373 pc down to its contrast limit; closer companions remain - best case shown; give the contrast curve to the pipeline with --contrast-curve
+  3. Transits in two or more filters (g' and z', simultaneous if possible)
+     addresses BEB, BEBx2P, BTP, DEB, DEBx2P, PEB, PEBx2P, SEB, SEBx2P, STP: P = 0.0202 of the total
+     if all of these are ruled out: FPP = 0.3599, NFPP = 0.3599 -> not enough by itself
+     typical outcome: FPP = 0.3643, NFPP = 0.3575
+       - PEB (P = 0.0000): 0 % of the companions bright enough to make the dip change the depth by > 20 % between g' and z'; example (best-fit companion of the last run, ~5532 K): depth(g') / depth(z') = 1.00
+       - PEBx2P (P = 0.0000): 0 % of the companions bright enough to make the dip change the depth by > 20 % between g' and z'; example (best-fit companion of the last run, ~1831 K): depth(g') / depth(z') = 1.00
+       - STP (P = 0.0169): 66 % of the companions bright enough to make the dip change the depth by > 20 % between g' and z'; example (best-fit companion of the last run, ~5507 K): depth(g') / depth(z') = 0.99
+       - SEB (P = 0.0028): 73 % of the companions bright enough to make the dip change the depth by > 20 % between g' and z'; example (best-fit companion of the last run, ~5060 K): depth(g') / depth(z') = 0.85, ~854 ppm apart -> needs a depth error of <= 285 ppm per band for 3 sigma
+       - SEBx2P (P = 0.0000): 73 % of the companions bright enough to make the dip change the depth by > 20 % between g' and z'; example (best-fit companion of the last run, ~4021 K): depth(g') / depth(z') = 0.41, ~4455 ppm apart -> needs a depth error of <= 1485 ppm per band for 3 sigma
+       - background / foreground stars: colour unknown, counted as 50 %
+     how: a planet on the target gives the same depth in every band (apart from limb darkening, a few %); a companion of another colour changes it.  Typical = the share of possible companions with a colour difference large enough to see; feed the light curves to TRICERATOPS+ (--ground-lc with band)
+  4. Reconnaissance spectroscopy (RV to ~1 km/s, 2-3 epochs; line profile / SB2)
+     addresses EB, EBx2P, PEB, SEB, STP: P = 0.0197 of the total
+     if all of these are ruled out: FPP = 0.3603, NFPP = 0.3598 -> not enough by itself
+     typical outcome: FPP = 0.3641, NFPP = 0.3576
+       - EB: best-fit companion 0.12 Msun -> K ~ 7.2 km/s
+       - EBx2P: best-fit companion 0.96 Msun -> K ~ 31.5 km/s
+       - PEB: companion with 46 % of the light - a second set of lines (SB2) unless the two velocities coincide
+       - STP: companion with 45 % of the light - a second set of lines (SB2) unless the two velocities coincide
+       - SEB: companion with 32 % of the light - a second set of lines (SB2) unless the two velocities coincide
+     how: a stellar-mass companion on the target gives K of km/s (a planet m/s); a bright companion shows its own lines, also closer than imaging can resolve
+  Shortest combination (typical outcomes): ground + spectroscopy -> FPP = 0.0101, NFPP = 0.0000
 
 ======================================================================
 SUMMARY
 ======================================================================
+  command_line: triceratops_validation.py --tic 65344135 --ephemeris 36.88 4352.3681 3200 5.33 --ephem-scan-hours 16 --dilution-mode none --ld-fit --tri-plus on
   triceratops_plus: True
+  mission: TESS
+  time_system: BTJD = BJD_TDB - 2457000
   tic: 65344135
-  script_version: 4.1.1
+  script_version: 4.3
   Teff: 5539
   R_star: 0.987852
   M_star: 0.97
   Tmag: 12.3302
+  star_source: TIC
   secondary:
       detected: False
       phase: None
       depth_ppm: None
-      lim3_ppm_median: 450.443
-      companion_T_K: 3561.42
+      lim3_ppm_median: 450.029
+      companion_T_K: 3562.08
       coverage: 0.975617
   P_d: 36.8787
   T0_BTJD: 4352.37
-  T14_h: 5.33
-  depth_ppm_adopted: 2825.43
+  T14_h: 5.51244
+  depth_ppm_adopted: 2820.19
   n_sectors: 7
   dilution_corrected_per_sector: False
   ld_fit:
-      rp: 0.0506285
-      b: 0.00134719
+      rp: 0.0504438
+      b: 4.26052e-10
       grazing: False
-      depth_ppm: 3058.86
-      T14_h: 5.48635
-  depth_on_target_ppm: 5321.89
-  depth_chi2_red: 1.88384
-  odd_even_sigma: 0.92209
+      depth_ppm: 3036.61
+      T14_h: 5.51244
+  ld_depth_not_adopted: b stuck at the b = 0 limit (b = 0.0000 +/- 2.7e-06)
+  edge_transit_epochs: [-2]
+  depth_chi2_red_excl_edge: 2.14562
+  odd_even_sigma_excl_edge: 1.0097
+  depth_on_target_ppm: 5316.74
+  depth_chi2_red: 1.88297
+  odd_even_sigma: 0.940571
+  depth_odd_ppm: 5507.7
+  depth_odd_err_ppm: 291.98
+  depth_even_ppm: 5112.74
+  depth_even_err_ppm: 301.782
   g_target_range: [0.5556037418189482, 0.5611198090948949]
   etv:
       n: 7
       P: 36.8786
       T0: 4352.37
-      eP: 8.71578e-05
-      rms_min: 9.39261
-      chi2_red: 2.06294
-      odd_even_dt_min: 2.59108
-      odd_even_dt_err_min: 4.18391
-      ecosw_2P: 3.83207e-05
-      ecosw_2P_err: 6.18777e-05
-      dPdE_d: -1.32772e-05
-      dPdE_err_d: 1.13652e-05
-      Pdot: -3.60025e-07
-      dchi2_quad: 2.62402
+      eP: 8.56998e-05
+      rms_min: 9.55928
+      chi2_red: 1.94302
+      odd_even_dt_min: 1.794
+      odd_even_dt_err_min: 6.28617
+      ecosw_2P: 2.65323e-05
+      ecosw_2P_err: 9.29689e-05
+      dPdE_d: -1.18962e-05
+      dPdE_err_d: 1.11456e-05
+      Pdot: -3.22577e-07
+      dchi2_quad: 1.13923
       ltte_best_P: 123.44
-      ltte_best_K_min: 17.1185
-      ltte_dchi2: 9.80076
-      ltte_lim3_min: 33.2855
-      ltte_lim3_au: 4.00222
-      depth_slope_ppm_yr: 60.9422
-      depth_slope_err_ppm_yr: 52.8828
-  di_offset_sigma_median: 0.880723
+      ltte_best_K_min: 17.2762
+      ltte_dchi2: 9.26886
+      ltte_lim3_min: 32.2917
+      ltte_lim3_au: 3.88273
+      depth_slope_ppm_yr: 61.0422
+      depth_slope_err_ppm_yr: 52.6306
+  di_offset_sigma_median: 0.848145
   scenario_classes:
-      planet on the target or an unresolved companion (TP, PTP, DTP): 0.61059
-      eclipsing binary on the target / bound companion (EB, EBx2P, PEB, PEBx2P, SEB, SEBx2P, STP): 0.0135867
-      unresolved background / foreground star (DEB, DEBx2P, BTP, BEB, BEBx2P): 0.00016116
-      resolved nearby star (NTP, NEB, NEBx2P): 0.375662
-  FPP: 0.38941
-  NFPP: 0.375662
+      planet on the target or an unresolved companion (TP, PTP, DTP): 0.627135
+      eclipsing binary on the target / bound companion (EB, EBx2P, PEB, PEBx2P, SEB, SEBx2P, STP): 0.0196997
+      unresolved background / foreground star (DEB, DEBx2P, BTP, BEB, BEBx2P): 0.000496415
+      resolved nearby star (NTP, NEB, NEBx2P): 0.352669
+  scenario_probs: [{'ID': 65344135, 'scenario': 'TP', 'prob': 0.4507394461630338, 'M_s': 0.97, 'R_s': 0.987852, 'R_p': 7.309804236251349, 'M_EB': 0.0, 'R_EB': 0.0, 'M_comp': 0.0, 'R_comp': 0.0, 'flux_ratio_comp_T': 0.0}, {'ID': 65344135, 'scenario': 'EB', 'prob': 5.7470912669465e-10, 'M_s': 0.97, 'R_s': 0.987852, 'R_p': 0.0, 'M_EB': 0.11889622166425604, 'R_EB': 0.14553376091090509, 'M_comp': 0.0, 'R_comp': 0.0, 'flux_ratio_comp_T': 0.0}, {'ID': 65344135, 'scenario': 'EBx2P', 'prob': 5.5836405496673015e-09, 'M_s': 0.97, 'R_s': 0.987852, 'R_p': 0.0, 'M_EB': 0.9645520402570361, 'R_EB': 0.987852, 'M_comp': 0.0, 'R_comp': 0.0, 'flux_ratio_comp_T': 0.0}, {'ID': 65344135, 'scenario': 'PTP', 'prob': 0.11246598153850491, 'M_s': 0.97, 'R_s': 0.987852, 'R_p': 7.218861307138591, 'M_EB': 0.0, 'R_EB': 0.0, 'M_comp': 0.20428026227836427, 'R_comp': 0.23389446522519144, 'flux_ratio_comp_T': 0.005356562386371538}, {'ID': 65344135, 'scenario': 'PEB', 'prob': 2.7973819983488446e-10, 'M_s': 0.97, 'R_s': 0.987852, 'R_p': 0.0, 'M_EB': 0.10059197384235609, 'R_EB': 0.1208495945968428, 'M_comp': 0.9317599515929718, 'R_comp': 0.9804834900788886, 'flux_ratio_comp_T': 0.4561178410090489}, {'ID': 65344135, 'scenario': 'PEBx2P', 'prob': 8.515252796587202e-09, 'M_s': 0.97, 'R_s': 0.987852, 'R_p': 0.0, 'M_EB': 0.9423694273861182, 'R_EB': 0.987852, 'M_comp': 0.14749380549409677, 'R_comp': 0.17890203224569987, 'flux_ratio_comp_T': 0.002183870978479302}, {'ID': 65344135, 'scenario': 'STP', 'prob': 0.016904505301408135, 'M_s': 0.9247723257619807, 'R_s': 0.9707437614618767, 'R_p': 10.84295384328637, 'M_EB': 0.0, 'R_EB': 0.0, 'M_comp': 0.97, 'R_comp': 0.987852, 'flux_ratio_comp_T': 0.44823108791480076}, {'ID': 65344135, 'scenario': 'SEB', 'prob': 0.002795139647206989, 'M_s': 0.80309848719692, 'R_s': 0.8299774734133634, 'R_p': 0.0, 'M_EB': 0.08496856585340229, 'R_EB': 0.1, 'M_comp': 0.97, 'R_comp': 0.987852, 'flux_ratio_comp_T': 0.31530059366363683}, {'ID': 65344135, 'scenario': 'SEBx2P', 'prob': 1.4672577699562686e-08, 'M_s': 0.5474223967384165, 'R_s': 0.5565054985776714, 'R_p': 0.0, 'M_EB': 0.5438333199270408, 'R_EB': 0.5527879311277764, 'M_comp': 0.97, 'R_comp': 0.987852, 'flux_ratio_comp_T': 0.05255471411514293}, {'ID': 65344135, 'scenario': 'DTP', 'prob': 0.06392962781703786, 'M_s': 0.97, 'R_s': 0.987852, 'R_p': 7.20002773966867, 'M_EB': 0.0, 'R_EB': 0.0, 'M_comp': 0.662, 'R_comp': 0.0, 'flux_ratio_comp_T': 0.0004498674603646543}, {'ID': 65344135, 'scenario': 'DEB', 'prob': 2.10002733156292e-10, 'M_s': 0.97, 'R_s': 0.987852, 'R_p': 0.0, 'M_EB': 0.12263071283597245, 'R_EB': 0.1502203970473538, 'M_comp': 0.564, 'R_comp': 0.0, 'flux_ratio_comp_T': 0.00042256784080590027}, {'ID': 65344135, 'scenario': 'DEBx2P', 'prob': 2.5865342797576963e-09, 'M_s': 0.97, 'R_s': 0.987852, 'R_p': 0.0, 'M_EB': 0.9644133452568622, 'R_EB': 0.987852, 'M_comp': 0.727, 'R_comp': 0.0, 'flux_ratio_comp_T': 0.0018150601136153045}, {'ID': 65344135, 'scenario': 'BTP', 'prob': 7.521312288608934e-05, 'M_s': 1.238, 'R_s': 1.32097359324819, 'R_p': 18.69831698074915, 'M_EB': 0.0, 'R_EB': 0.0, 'M_comp': 0.97, 'R_comp': 0.987852, 'flux_ratio_comp_T': 0.22839030957574694}, {'ID': 65344135, 'scenario': 'BEB', 'prob': 0.0004211915266769092, 'M_s': 1.384, 'R_s': 1.8949679048901724, 'R_p': 0.0, 'M_EB': 0.15854718666319462, 'R_EB': 0.19048115890178008, 'M_comp': 0.97, 'R_comp': 0.987852, 'flux_ratio_comp_T': 0.4259900304945423}, {'ID': 65344135, 'scenario': 'BEBx2P', 'prob': 7.809942122258237e-09, 'M_s': 1.114, 'R_s': 1.231619082219507, 'R_p': 0.0, 'M_EB': 1.0870623596440543, 'R_EB': 1.2027777925840217, 'M_comp': 0.97, 'R_comp': 0.987852, 'flux_ratio_comp_T': 0.0954374055895684}, {'ID': 65344134, 'scenario': 'NTP', 'prob': 0.35266883578191777, 'M_s': 0.94, 'R_s': 0.914508, 'R_p': 7.643087086687042, 'M_EB': 0.0, 'R_EB': 0.0, 'M_comp': 0.0, 'R_comp': 0.0, 'flux_ratio_comp_T': 0.0}, {'ID': 65344134, 'scenario': 'NEB', 'prob': 7.800102929187542e-11, 'M_s': 0.94, 'R_s': 0.914508, 'R_p': 0.0, 'M_EB': 0.12883601010864748, 'R_EB': 0.15777193035491716, 'M_comp': 0.0, 'R_comp': 0.0, 'flux_ratio_comp_T': 0.0}, {'ID': 65344134, 'scenario': 'NEBx2P', 'prob': 1.8790928908055692e-08, 'M_s': 0.94, 'R_s': 0.914508, 'R_p': 0.0, 'M_EB': 0.9233610751308812, 'R_EB': 0.914508, 'M_comp': 0.0, 'R_comp': 0.0, 'flux_ratio_comp_T': 0.0}]
+  neighbours: [{'ID': 65344135, 'sep': 0.0, 'Tmag': 12.3302, 'Teff': 5539.0, 'fluxratio': 0.5579151674375845, 'tdepth': 0.005054873457631892}, {'ID': 65344134, 'sep': 5.864, 'Tmag': 12.5621, 'Teff': 5391.0, 'fluxratio': 0.44115125780981274, 'tdepth': 0.0063927973037908314}]
+  distance_pc: 373.116
+  triceratops_criteria_met: False
+  recommendations:
+      text: ['FPP = 0.3729, NFPP = 0.3527 now (criteria: FPP < 0.015, NFPP < 0.001)', '1. Ground photometry, separate apertures on the target and each nearby star', '   addresses NEB (TIC 65344134), NEBx2P (TIC 65344134), NTP (TIC 65344134): P = 0.3527 of the total', '   if all of these are ruled out: FPP = 0.0312, NFPP = 0.0000 -> not enough by itself', '     - TIC 65344134: 5.9" , Tmag 12.56, P(signal on it) = 0.353, it would have to dim by 6393 ppm', '   how: one transit, seeing <= 3"; the star that shows the dip is the host (on the target: 5055 ppm); feed the light curves back with --ground-lc', '2. High-resolution imaging (speckle / adaptive optics)', '   addresses BEB, BEBx2P, BTP, DEB, DEBx2P, PEB, PEBx2P, SEB, SEBx2P, STP: P = 0.0202 of the total', '   if all of these are ruled out: FPP = 0.3599, NFPP = 0.3599 -> not enough by itself', '   typical outcome: FPP = 0.3659, NFPP = 0.3566', '     - PEB: best-fit companion 0.93 Msun, 46 % of the TESS light (contrast ~0.2 mag)', '     - PEBx2P: best-fit companion 0.15 Msun, 0 % of the TESS light (contrast ~6.6 mag)', '     - STP: best-fit companion 0.92 Msun, 45 % of the TESS light (contrast ~0.2 mag)', '     - SEB: best-fit companion 0.80 Msun, 32 % of the TESS light (contrast ~0.8 mag)', '     - SEBx2P: best-fit companion 0.55 Msun, 5 % of the TESS light (contrast ~3.1 mag)', '     - typically 53 % of bound companions lie outside 0.1" (separation distribution of Raghavan et al. 2010); background stars: ~95 %', '   how: rules out companions and background stars outside ~0.1" = 37 au at 373 pc down to its contrast limit; closer companions remain - best case shown; give the contrast curve to the pipeline with --contrast-curve', "3. Transits in two or more filters (g' and z', simultaneous if possible)", '   addresses BEB, BEBx2P, BTP, DEB, DEBx2P, PEB, PEBx2P, SEB, SEBx2P, STP: P = 0.0202 of the total', '   if all of these are ruled out: FPP = 0.3599, NFPP = 0.3599 -> not enough by itself', '   typical outcome: FPP = 0.3643, NFPP = 0.3575', "     - PEB (P = 0.0000): 0 % of the companions bright enough to make the dip change the depth by > 20 % between g' and z'; example (best-fit companion of the last run, ~5532 K): depth(g') / depth(z') = 1.00", "     - PEBx2P (P = 0.0000): 0 % of the companions bright enough to make the dip change the depth by > 20 % between g' and z'; example (best-fit companion of the last run, ~1831 K): depth(g') / depth(z') = 1.00", "     - STP (P = 0.0169): 66 % of the companions bright enough to make the dip change the depth by > 20 % between g' and z'; example (best-fit companion of the last run, ~5507 K): depth(g') / depth(z') = 0.99", "     - SEB (P = 0.0028): 73 % of the companions bright enough to make the dip change the depth by > 20 % between g' and z'; example (best-fit companion of the last run, ~5060 K): depth(g') / depth(z') = 0.85, ~854 ppm apart -> needs a depth error of <= 285 ppm per band for 3 sigma", "     - SEBx2P (P = 0.0000): 73 % of the companions bright enough to make the dip change the depth by > 20 % between g' and z'; example (best-fit companion of the last run, ~4021 K): depth(g') / depth(z') = 0.41, ~4455 ppm apart -> needs a depth error of <= 1485 ppm per band for 3 sigma", '     - background / foreground stars: colour unknown, counted as 50 %', '   how: a planet on the target gives the same depth in every band (apart from limb darkening, a few %); a companion of another colour changes it.  Typical = the share of possible companions with a colour difference large enough to see; feed the light curves to TRICERATOPS+ (--ground-lc with band)', '4. Reconnaissance spectroscopy (RV to ~1 km/s, 2-3 epochs; line profile / SB2)', '   addresses EB, EBx2P, PEB, SEB, STP: P = 0.0197 of the total', '   if all of these are ruled out: FPP = 0.3603, NFPP = 0.3598 -> not enough by itself', '   typical outcome: FPP = 0.3641, NFPP = 0.3576', '     - EB: best-fit companion 0.12 Msun -> K ~ 7.2 km/s', '     - EBx2P: best-fit companion 0.96 Msun -> K ~ 31.5 km/s', '     - PEB: companion with 46 % of the light - a second set of lines (SB2) unless the two velocities coincide', '     - STP: companion with 45 % of the light - a second set of lines (SB2) unless the two velocities coincide', '     - SEB: companion with 32 % of the light - a second set of lines (SB2) unless the two velocities coincide', '   how: a stellar-mass companion on the target gives K of km/s (a planet m/s); a bright companion shows its own lines, also closer than imaging can resolve', 'Shortest combination (typical outcomes): ground + spectroscopy -> FPP = 0.0101, NFPP = 0.0000']
+      plan: ['ground', 'spectroscopy']
+      items: [{'key': 'ground', 'title': 'Ground photometry, separate apertures on the target and each nearby star', 'scenarios': ['NEB (TIC 65344134)', 'NEBx2P (TIC 65344134)', 'NTP (TIC 65344134)'], 'prob_addressed': 0.35266885465084774, 'fpp_after': 0.03119900838338687, 'nfpp_after': 0.0, 'fpp_typical': 0.03119900838338687, 'nfpp_typical': 0.0, 'meets': False}, {'key': 'hires', 'title': 'High-resolution imaging (speckle / adaptive optics)', 'scenarios': ['BEB', 'BEBx2P', 'BTP', 'DEB', 'DEBx2P', 'PEB', 'PEBx2P', 'SEB', 'SEBx2P', 'STP'], 'prob_addressed': 0.02019608367222595, 'fpp_after': 0.35993820287121514, 'nfpp_after': 0.3599381965859273, 'fpp_typical': 0.36590386369021977, 'nfpp_typical': 0.3565834123974816, 'meets': False}, {'key': 'multiband', 'title': "Transits in two or more filters (g' and z', simultaneous if possible)", 'scenarios': ['BEB', 'BEBx2P', 'BTP', 'DEB', 'DEBx2P', 'PEB', 'PEBx2P', 'SEB', 'SEBx2P', 'STP'], 'prob_addressed': 0.02019608367222595, 'fpp_after': 0.35993820287121514, 'nfpp_after': 0.3599381965859273, 'fpp_typical': 0.3643160975150867, 'nfpp_typical': 0.3574762913292365, 'meets': False}, {'key': 'spectroscopy', 'title': 'Reconnaissance spectroscopy (RV to ~1 km/s, 2-3 epochs; line profile / SB2)', 'scenarios': ['EB', 'EBx2P', 'PEB', 'SEB', 'STP'], 'prob_addressed': 0.019699651386702998, 'fpp_after': 0.3602623355120676, 'nfpp_after': 0.3597559208764155, 'fpp_typical': 0.36409598207866983, 'nfpp_typical': 0.35760007305403246, 'meets': False}]
+  FPP: 0.372865
+  NFPP: 0.352669
   verdict: NOT passed
   n_runs: 20
   n_valid: 20
-  dominance: 0.0714061
-  sigma_ppm: 668.026
+  dominance: 0.075813
+  sigma_ppm: 615.051

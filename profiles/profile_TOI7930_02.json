@@ -1,0 +1,15 @@
+{
+  "gui_version": "1.2",
+  "description": "TOI-7930.02 (TIC 4206066, K/M dwarf 35.6 pc, Tmag 9.68, variable host): P = 3.18279 d, 462 ppm, 1.78 h, QLP PC (Steve Price's test target); TOI-7930.01 masked",
+  "options": {
+    "tic": "4206066",
+    "outdir": "TIC4206066_02",
+    "ephemeris": ["3.1827878", "4040.113969", "462", "1.78"],
+    "mask_ephemeris": "11.132727 4034.264547 2.0",
+    "ld_fit": true,
+    "vet_neighbours": true,
+    "sensitivity": true,
+    "red_noise_scrambles": "2000"
+  },
+  "ground": []
+}

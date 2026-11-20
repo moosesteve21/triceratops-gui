@@ -102,12 +102,13 @@ def action_help(a) -> str:
 TABS = [
     ("Target & ephemeris", [
         "tic", "mission", "kic", "host_tic", "star_source", "stellar",
-        "outdir", "ephemeris", "blind_search", "p_min", "p_max",
+        "outdir", "ephemeris", "mask_ephemeris", "blind_search", "p_min", "p_max",
         "ephem_search", "no_ephem_scan", "ephem_scan_hours", "ephem_grid_dp",
         "ephem_grid_min_snr", "no_refine_ephemeris", "refine_chi2_max",
-        "no_tc_fit"]),
+        "ephem_adopt_max_sigma", "no_tc_fit"]),
     ("Light curve", [
-        "lc_source", "download_dir", "exclude_sectors", "no_auto_exclude_sectors",
+        "lc_source", "download_dir", "prefetch_only", "net_timeout", "net_retries",
+        "exclude_sectors", "no_auto_exclude_sectors",
         "sector_max_rms", "aperture", "dilution_mode", "raw_aperture_flux",
         "dilution_corrected", "detrend_windows", "err_floor_ppm", "no_inflate"]),
     ("Shape & tests", [
@@ -115,18 +116,21 @@ TABS = [
         "secondary_min_snr", "red_noise_scrambles", "red_noise_seed",
         "no_etv", "extra_times"]),
     ("Field", [
-        "contrast_curve", "vet_neighbours", "no_difference_imaging",
+        "contrast_curve", "molusc_file", "molusc_n", "molusc_multiplicity",
+        "vet_neighbours", "no_difference_imaging",
         "exclude_stars"]),
     ("TRICERATOPS", [
-        "n_iter", "n_samples", "no_pool", "sensitivity", "sens_runs",
+        "n_iter", "n_samples", "bin_minutes", "no_pool", "sensitivity", "sens_runs",
         "tri_exptime_min", "tri_max_iter", "tri_time_budget", "trilegal_fname",
-        "tri_plus"]),
+        "tri_plus", "no_eb_veto", "hires_iwa"]),
     ("Ground photometry", [
         "ground_lc", "ground_list", "ground_no_clear", "ground_tc_window",
         "ground_min_snr", "ground_depth_tol", "ground_fwhm"]),
 ]
 LABELS = {
     "tic": "TIC ID", "mission": "Mission (TESS / Kepler)", "kic": "KIC ID (Kepler)",
+    "no_eb_veto": "Verdict from FPP/NFPP only (ignore own EB tests)",
+    "hires_iwa": "Imaging inner working angle for advice [\"]",
     "host_tic": "Host star for TRICERATOPS (TIC)",
     "star_source": "Stellar parameters from", "stellar": "Manual R M Teff [logg]",
     "outdir": "Output folder", "ephemeris": "Known ephemeris",
@@ -136,8 +140,12 @@ LABELS = {
     "ephem_grid_dp": "Grid half-range in P [d]",
     "ephem_grid_min_snr": "Grid min. S/N", "no_refine_ephemeris":
     "Do not refine P, T0 from transits", "refine_chi2_max": "Refine: max chi2_red",
+    "ephem_adopt_max_sigma": "Refine: max prediction error [T14]",
+    "mask_ephemeris": "Mask other planets (P T0 T14_h ...)",
     "no_tc_fit": "Fixed mid-times in per-transit fits",
     "lc_source": "Light-curve source", "download_dir": "TESScut cache folder",
+    "prefetch_only": "Only download the cutouts (no analysis)",
+    "net_timeout": "MAST timeout [s]", "net_retries": "MAST attempts",
     "exclude_sectors": "Exclude sectors", "no_auto_exclude_sectors":
     "No automatic sector exclusion", "sector_max_rms": "Max sector rms",
     "aperture": "Aperture", "dilution_mode": "Dilution correction",
@@ -151,10 +159,13 @@ LABELS = {
     "red_noise_scrambles": "Red-noise scrambles", "red_noise_seed":
     "Red-noise seed", "no_etv": "No timing analysis", "extra_times":
     "Extra mid-times file",
-    "contrast_curve": "Contrast curve", "vet_neighbours": "Vet neighbours",
+    "contrast_curve": "Contrast curve", "molusc_file": "MOLUSC companions file (_kept.csv)",
+    "molusc_n": "MOLUSC: companions generated",
+    "molusc_multiplicity": "MOLUSC: multiplicity fraction",
+    "vet_neighbours": "Vet neighbours",
     "no_difference_imaging": "No difference imaging",
     "exclude_stars": "Exclude stars (TIC)",
-    "n_iter": "Min. runs (n_iter)", "n_samples": "Samples per run (N)",
+    "n_iter": "Min. runs (n_iter)", "bin_minutes": "Bin of the fold [min]", "n_samples": "Samples per run (N)",
     "no_pool": "Do not pool runs", "sensitivity": "Sensitivity runs",
     "sens_runs": "Runs per sensitivity case", "tri_exptime_min":
     "Model exposure [min]", "tri_max_iter": "Max. runs", "tri_time_budget":
@@ -166,7 +177,8 @@ LABELS = {
     "ground_depth_tol": "Depth tolerance", "ground_fwhm": "Default seeing [\"]",
 }
 DIR_OPTIONS = {"outdir", "download_dir"}
-FILE_OPTIONS = {"contrast_curve", "trilegal_fname", "extra_times", "ground_list"}
+FILE_OPTIONS = {"contrast_curve", "molusc_file", "trilegal_fname", "extra_times",
+                "ground_list"}
 EPHEM_FIELDS = ("P [d]", "T0 [BTJD/BKJD or BJD]", "Depth [ppm]", "T14 [h]")
 GROUND_BANDS = ["", "R", "V", "B", "I", "g", "r", "i", "z", "J", "H", "K",
                 "CBB", "CV", "TESS"]
@@ -1308,6 +1320,21 @@ class App(tk.Tk):
         self.ground.specs = list(st.get("ground", []))
         self.ground.refresh()
         self.update_command()
+        # options the loaded script does not know are NOT silently dropped:
+        # usually the script was updated after the GUI was started (its
+        # options are read once, at start-up)
+        unknown = sorted(k for k in st.get("options", {})
+                         if k not in self.widgets and k != "ground_lc")
+        if unknown:
+            msg = ("This profile sets option(s) that the loaded script does not "
+                   "know:\n  " + "\n  ".join(unknown) + "\n\nThey are NOT used "
+                   "in the command.  If the script was updated after the GUI "
+                   "was started, close and restart the GUI and load the "
+                   "profile again.")
+            try:
+                messagebox.showwarning("Profile", msg)
+            except Exception:
+                print("WARNING: " + msg)
 
     def save_settings(self, path, options_only=False, description=None):
         try:
