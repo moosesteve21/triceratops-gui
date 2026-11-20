@@ -27,7 +27,9 @@ prefetch after --prefetch-timeout and a test after --test-timeout minutes
 --test-retries times, --retry-wait minutes later.  Prefetching again is
 cheap: cutouts already in the cache are skipped.
 
-Batch file (paths relative to the current directory):
+Batch file (paths relative to the current directory; so are the input
+files named in the options and profiles, such as molusc_file and ground
+light curves, which are passed on as absolute paths):
 
     {
       "name": "round3",                  optional; default: the file name
@@ -76,6 +78,36 @@ MANAGED = ("outdir", "download_dir", "prefetch_only")
 BATCH_KEYS = {"name", "results_dir", "cache_dir", "workers", "audit", "defaults",
               "candidates", "notes", "description"}
 CANDIDATE_KEYS = {"label", "tic", "profile", "options", "outdir", "notes", "description"}
+# Options that name an input file.  Each run starts in its own outdir, so a
+# relative path would be looked up there; it is made absolute (relative to the
+# current directory) when the batch file is read.  A missing --molusc-file,
+# for example, only gives a note in the log and the default companion prior.
+PATH_OPTIONS = ("contrast_curve", "molusc_file", "trilegal_fname", "extra_times",
+                "ground_list")
+
+
+def _abs_path(p) -> str:
+    p = str(p)
+    return p if not p or os.path.isabs(p) else os.path.abspath(p)
+
+
+def _abs_ground_spec(spec) -> str:
+    """A --ground-lc spec 'path,band=r,...' with the path made absolute."""
+    path, sep, rest = str(spec).partition(",")
+    return _abs_path(path.strip()) + sep + rest
+
+
+def resolve_paths(opts: dict, ground: list) -> tuple:
+    """Copies of opts and ground with every input-file path made absolute."""
+    opts = dict(opts)
+    for k in PATH_OPTIONS:
+        if opts.get(k) not in (None, ""):
+            opts[k] = _abs_path(opts[k])
+    g = opts.get("ground_lc")
+    if g not in (None, "", []):
+        opts["ground_lc"] = [_abs_ground_spec(s) for s in
+                             (g if isinstance(g, (list, tuple)) else [g])]
+    return opts, [_abs_ground_spec(s) for s in ground]
 
 
 # --------------------------------------------------------------------------
@@ -166,6 +198,7 @@ def load_batch(path: str, parser) -> dict:
         dropped = [k for k in MANAGED if opts.pop(k, None) not in (None, False, "")]
         if opts.get("tic") in (None, ""):
             raise ValueError(f"{where}: no tic")
+        opts, ground = resolve_paths(opts, ground)
         label = str(c.get("label") or f"TIC{opts['tic']}")
         if label in seen:
             raise ValueError(f"{where}: label {label!r} used twice")

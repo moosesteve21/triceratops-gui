@@ -61,10 +61,46 @@ def test_load_batch_merges_defaults_profile_and_options(tmp_path):
     j1, j2 = b["jobs"]
     assert j1["outdir"] == os.path.join(b["root"], "kX_off")
     ns = PARSER.parse_args(j1["args"])
-    assert ns.ephem_search == "off" and ns.ld_fit and ns.ground_lc == ["g.tbl,band=r"]
+    assert ns.ephem_search == "off" and ns.ld_fit and ns.ground_lc == [os.path.abspath("g.tbl") + ",band=r"]
     assert ns.outdir is None and j1["dropped"] == ["outdir"]   # set by the batch
     assert j2["label"] == "TIC999000002" and j2["tic"] == 999000002
     assert PARSER.parse_args(j2["args"]).ephem_search == "scan"
+
+
+def test_load_batch_makes_input_paths_absolute(tmp_path, monkeypatch):
+    """Each run starts in its own outdir, so relative input paths would be
+    looked up there (a missing MOLUSC file falls back to the default prior)."""
+    monkeypatch.chdir(tmp_path)
+    prof = _write(tmp_path / "p.json", {"options": {
+        "tic": "999000001", "molusc_file": "m/kept.csv", "molusc_n": "1000000"},
+        "ground": ["g/night1.tbl,band=r,ap=4"]})
+    batch = _write(tmp_path / "b.json", {"candidates": [
+        {"label": "a", "profile": prof, "options": {
+            "bin_minutes": 5, "contrast_curve": "cc.txt", "trilegal_fname": "tri.csv",
+            "extra_times": "t.txt", "ground_list": "gl.txt",
+            "ground_lc": ["g/night2.tbl,band=i"]}},
+        {"label": "b", "tic": 999000002, "options": {
+            "molusc_file": str(tmp_path / "abs.csv")}}]})
+    j1, j2 = tb.load_batch(batch, PARSER)["jobs"]
+    ns = PARSER.parse_args(j1["args"])
+    here = str(tmp_path)
+    assert ns.molusc_file == os.path.join(here, "m", "kept.csv") and ns.molusc_n == 1000000
+    assert ns.bin_minutes == 5
+    assert ns.contrast_curve == os.path.join(here, "cc.txt")
+    assert ns.trilegal_fname == os.path.join(here, "tri.csv")
+    assert ns.extra_times == os.path.join(here, "t.txt")
+    assert ns.ground_list == os.path.join(here, "gl.txt")
+    assert sorted(ns.ground_lc) == sorted([
+        os.path.join(here, "g", "night2.tbl") + ",band=i",
+        os.path.join(here, "g", "night1.tbl") + ",band=r,ap=4"])
+    assert PARSER.parse_args(j2["args"]).molusc_file == str(tmp_path / "abs.csv")
+
+
+def test_every_file_option_is_resolved():
+    """A new FILE option in the pipeline must be added to PATH_OPTIONS."""
+    files = {a.dest for a in PARSER._actions
+             if a.option_strings and a.metavar == "FILE"}
+    assert files <= set(tb.PATH_OPTIONS)
 
 
 def test_load_batch_allows_notes_and_reports_unknown_keys(tmp_path):
