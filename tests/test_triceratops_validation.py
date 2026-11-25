@@ -431,6 +431,39 @@ def test_etv_significance_scaled_when_errors_underestimated(tmp_path):
     assert out["ltte_dchi2"] < 15 and out["dchi2_quad"] < 9
 
 
+def test_etv_also_reported_without_flagged_transits(tmp_path):
+    # two low-coverage transits with wandering mid-times (-44 and +36 min)
+    # inflate the O-C scatter; without them the timing is clean.  Both
+    # values are reported, the all-transit value stays the main one.
+    cfg = _cfg(tmp_path)
+    rng = np.random.default_rng(7)
+    E = np.arange(0, 14)
+    oc = rng.normal(0, 2.0 / 1440, E.size)
+    oc[3], oc[8] = -44.0 / 1440, 36.0 / 1440
+    dt = np.array([(int(e), T0_TRUE + e * P_TRUE, 1e-3, 1e-4, 40, 1.0,
+                    o, 2.0 / 1440, 10.0, 20.0) for e, o in zip(E, oc)],
+                  dtype=tv._PT_DTYPE)
+    out0 = tv.etv_analysis(dt, P_TRUE, T0_TRUE, cfg, 1)
+    assert "rms_min_excl_flagged" not in out0      # nothing flagged yet
+    tv._summary(cfg).update(edge_transit_epochs=[], low_coverage_epochs=[3, 8])
+    log = tmp_path / "etv.log"
+    with open(log, "w", encoding="utf-8") as fh:
+        out = tv.etv_analysis(dt, P_TRUE, T0_TRUE, cfg, 1, log=fh)
+    for k in ("rms_min", "chi2_red", "odd_even_dt_min", "dchi2_quad", "ltte_dchi2"):
+        assert out[k] == pytest.approx(out0[k])    # main values unchanged
+    assert out["chi2_red"] > 50
+    assert out["chi2_red_excl_flagged"] < 3 and out["n_excl_flagged"] == 12
+    assert out["rms_min_excl_flagged"] < 4 < out["rms_min"]
+    assert out["flagged_epochs"] == [3, 8]
+    etv = tv._summary(cfg)["etv"]
+    assert etv["chi2_red_excl_flagged"] == out["chi2_red_excl_flagged"]
+    assert etv["flagged_epochs"] == [3, 8]
+    assert not any(k.startswith("_") for k in etv)
+    text = log.read_text(encoding="utf-8")
+    assert "flagged transits (epochs 3, 8)" in text
+    assert "without the flagged transits" in text
+
+
 def test_missing_parity_points_to_2p():
     def diag(depths):
         dt = np.array([(e, T0_TRUE + e * 3.0, d, 2.5e-4, 40, 1.0, 0.0, 0.003, d / 2.5e-4, 0.0)

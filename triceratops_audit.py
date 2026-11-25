@@ -310,8 +310,14 @@ def evaluate(run: Run, A: Audit):
                 kind="derived", source=f"{sj}:secondary")
     if run.S("etv"):
         e = run.S("etv")
-        A.claim("ETV O-C rms, LTTE limit", f"{_f(e.get('rms_min'))} min, "
-                f"{_f(e.get('ltte_lim3_min'))} min", kind="derived", source=f"{sj}:etv")
+        txt = f"{_f(e.get('rms_min'))} min, {_f(e.get('ltte_lim3_min'))} min"
+        if e.get("rms_min_excl_flagged") is not None:
+            ep = e.get("flagged_epochs") or []
+            txt += (f"; {_f(e.get('rms_min_excl_flagged'))} min, "
+                    f"{_f(e.get('ltte_lim3_min_excl_flagged'))} min without the "
+                    f"flagged transits"
+                    + (f" (epochs {', '.join(str(int(x)) for x in ep)})" if ep else ""))
+        A.claim("ETV O-C rms, LTTE limit", txt, kind="derived", source=f"{sj}:etv")
     if run.di:
         A.claim("difference-imaging sectors", len(run.di), kind="measured",
                 source=f"difference_imaging_{run.tic}.csv")

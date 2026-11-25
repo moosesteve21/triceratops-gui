@@ -3925,6 +3925,96 @@ def _read_extra_times(path):
     return rows
 
 
+# summary["etv"] keys that are also given without the flagged transits,
+# as <key>_excl_flagged
+_TIMING_EXCL_KEYS = ("n", "rms_min", "chi2_red", "odd_even_dt_min",
+                     "odd_even_dt_err_min", "dPdE_d", "dPdE_err_d", "dchi2_quad",
+                     "ltte_dchi2", "ltte_lim3_min")
+
+
+def _timing_tests(E, t, e, P) -> dict:
+    """Linear ephemeris, odd/even mid-times, quadratic ephemeris and the
+    light-travel-time search on mid-times t [d] with errors e at epochs E.
+
+    Returns the etv_analysis keys, plus private ones (leading '_') used for
+    the log: _r1 (linear O-C residuals [d]), _odd (odd-epoch mask),
+    _oe_sigma, _q_sigma, _span, _ltte_K_err_min.
+    """
+    w = 1.0 / e ** 2
+
+    def wls(A):
+        Aw = A * np.sqrt(w)[:, None]
+        cov = np.linalg.pinv(Aw.T @ Aw)
+        p = cov @ (Aw.T @ (t * np.sqrt(w)))
+        r = t - A @ p
+        return p, cov, r, float(np.sum(w * r ** 2))
+
+    A1 = np.column_stack([np.ones_like(E), E])
+    p1, c1, r1, chi1 = wls(A1)
+    n = E.size
+    out = dict(n=n, P=float(p1[1]), T0=float(p1[0]),
+               eP=float(np.sqrt(c1[1, 1] * max(chi1 / max(n - 2, 1), 1))),
+               rms_min=float(np.sqrt(np.mean(r1 ** 2)) * 1440),
+               chi2_red=float(chi1 / max(n - 2, 1)))
+
+    def _scale(chi, k):
+        """Error inflation from a model with k parameters (>= 1)."""
+        return max(chi / max(n - k, 1), 1.0)
+    # odd / even
+    odd = (np.mod(E, 2) == 1)
+    out.update(_r1=r1, _odd=odd)
+    if odd.any() and (~odd).any():
+        def wm(sel):
+            ww = w[sel]
+            return np.sum(ww * r1[sel]) / np.sum(ww), 1 / np.sqrt(np.sum(ww))
+        mo, eo = wm(odd)
+        me, ee = wm(~odd)
+        _, _, _, chi_oe = wls(np.column_stack([np.ones_like(E), E, odd.astype(float)]))
+        dlt, edl = mo - me, np.hypot(eo, ee) * np.sqrt(_scale(chi_oe, 3))
+        ecosw = np.pi * dlt / (4.0 * P)            # binary at 2P: half-period offset
+        eecw = np.pi * edl / (4.0 * P)
+        out.update(odd_even_dt_min=float(dlt * 1440), odd_even_dt_err_min=float(edl * 1440),
+                   ecosw_2P=float(ecosw), ecosw_2P_err=float(eecw),
+                   _oe_sigma=float(dlt / edl))
+    # quadratic
+    if n >= 4:
+        A2 = np.column_stack([np.ones_like(E), E, E ** 2])
+        p2, c2, r2, chi2q = wls(A2)
+        q, eq = p2[2], np.sqrt(c2[2, 2] * max(chi2q / max(n - 3, 1), 1))
+        pdot = 2 * q / P                          # dP/dt [d/d]
+        dchi2_q = (chi1 - chi2q) / _scale(chi2q, 3)
+        out.update(dPdE_d=float(2 * q), dPdE_err_d=float(2 * eq),
+                   Pdot=float(pdot), dchi2_quad=float(dchi2_q),
+                   _q_sigma=float(q / eq))
+    # light-travel time effect
+    span = float(t.max() - t.min())
+    if n >= 6 and span > 0:
+        Pg = np.exp(np.linspace(np.log(3.0 * P), np.log(3.0 * span), 400))
+        best = None
+        lims = []
+        for Po in Pg:
+            ph = 2 * np.pi * (t - t.min()) / Po
+            A3 = np.column_stack([np.ones_like(E), E, np.sin(ph), np.cos(ph)])
+            p3, c3, r3, chi3 = wls(A3)
+            K = float(np.hypot(p3[2], p3[3]))
+            sK = float(np.sqrt(0.5 * (c3[2, 2] + c3[3, 3])
+                               * max(chi3 / max(n - 4, 1), 1)))
+            lims.append((Po, K + 3 * sK))
+            if best is None or chi3 < best[1]:
+                best = (Po, chi3, K, sK)
+        lims = np.array(lims)
+        inside = lims[:, 0] <= span
+        lim_in = float(np.median(lims[inside, 1])) if inside.any() else np.nan
+        c_au_per_day = 173.1446
+        dchi2_l = (chi1 - best[1]) / _scale(best[1], 4)
+        out.update(ltte_best_P=float(best[0]), ltte_best_K_min=float(best[2] * 1440),
+                   ltte_dchi2=float(dchi2_l),
+                   ltte_lim3_min=float(lim_in * 1440),
+                   ltte_lim3_au=float(lim_in * c_au_per_day),
+                   _span=span, _ltte_K_err_min=float(best[3] * 1440))
+    return out
+
+
 def etv_analysis(dt, P, T0, cfg: "Config", tic: int, log=None):
     """Eclipse timing (and depth) variations from the per-transit fits.
 
@@ -3937,6 +4027,11 @@ def etv_analysis(dt, P, T0, cfg: "Config", tic: int, log=None):
     * eclipse-depth trend (orbital precession changes the impact parameter;
       grazing eclipses are very sensitive to it);
     * optional ground-based mid-times (cfg.extra_times_file).
+
+    When report_depths_per_sector flagged transits (next to a data gap, or
+    with too little in-transit data), the timing tests are also given without
+    them (<key>_excl_flagged in summary["etv"]); the values over all transits
+    stay the main result.
     """
     if dt is None or dt.size < 3:
         return None
@@ -3966,97 +4061,72 @@ def etv_analysis(dt, P, T0, cfg: "Config", tic: int, log=None):
     if getattr(cfg, "_ground_times", None):
         _log(log, f"  {len(cfg._ground_times)} mid-time(s) from the ground "
                   f"light curves added")
-    w = 1.0 / e ** 2
+    out = _timing_tests(E, t, e, P)
+    r1, odd, n = out.pop("_r1"), out.pop("_odd"), out["n"]
+    # The same tests without the transits flagged by report_depths_per_sector
+    # (next to a data-segment edge, or with too little in-transit data): their
+    # free mid-times can wander.  They are reported alongside, not dropped:
+    # real timing variations exist (multi-planet systems), and many flagged
+    # transits time well.
+    sm = _summary(cfg)
+    flagged = sorted({int(x) for x in (sm.get("edge_transit_epochs") or [])}
+                     | {int(x) for x in (sm.get("low_coverage_epochs") or [])})
+    fl = (src == "TESS") & np.isin(E, flagged)
+    xo = None
+    if fl.any() and (~fl).sum() >= 3:
+        xo = _timing_tests(E[~fl], t[~fl], e[~fl], P)
+        for k in ("_r1", "_odd"):
+            xo.pop(k)
+        out.update({f"{k}_excl_flagged": v for k, v in xo.items()
+                    if k in _TIMING_EXCL_KEYS})
+        out["flagged_epochs"] = [int(x) for x in np.unique(E[fl])]
 
-    def wls(A):
-        Aw = A * np.sqrt(w)[:, None]
-        cov = np.linalg.pinv(Aw.T @ Aw)
-        p = cov @ (Aw.T @ (t * np.sqrt(w)))
-        r = t - A @ p
-        return p, cov, r, float(np.sum(w * r ** 2))
+    def _x(key, fmt):
+        """'; <value> without the flagged transits' for a log line."""
+        if xo is None or key not in xo or not np.isfinite(xo[key]):
+            return ""
+        return f"; {fmt.format(xo[key])} without the flagged transits"
 
-    A1 = np.column_stack([np.ones_like(E), E])
-    p1, c1, r1, chi1 = wls(A1)
-    n = E.size
-    out = dict(n=n, P=float(p1[1]), T0=float(p1[0]),
-               eP=float(np.sqrt(c1[1, 1] * max(chi1 / max(n - 2, 1), 1))),
-               rms_min=float(np.sqrt(np.mean(r1 ** 2)) * 1440),
-               chi2_red=float(chi1 / max(n - 2, 1)))
     _log(log, f"\n--- Eclipse timing variations ({n} mid-times) ---")
+    if xo is not None:
+        _log(log, f"  flagged transits (epochs {', '.join(map(str, out['flagged_epochs']))}): "
+                  f"each test is also given without them ({xo['n']} mid-times)")
     _log(log, f"  linear ephemeris: P = {out['P']:.6f} +/- {out['eP']:.6f} d; "
-              f"O-C rms = {out['rms_min']:.1f} min, chi2_red = {out['chi2_red']:.2f}")
+              f"O-C rms = {out['rms_min']:.1f} min, chi2_red = {out['chi2_red']:.2f}"
+              + (f"; O-C rms = {xo['rms_min']:.1f} min, chi2_red = "
+                 f"{xo['chi2_red']:.2f} without the flagged transits"
+                 if xo is not None else ""))
     if out["chi2_red"] > 2.0:
         _log(log, f"  ! the O-C scatter is {np.sqrt(out['chi2_red']):.1f} x the "
                   f"per-transit timing errors (errors underestimated, or real "
                   f"timing variations): every test below scales its errors by "
-                  f"the chi2_red of its own model")
-
-    def _scale(chi, k):
-        """Error inflation from a model with k parameters (>= 1)."""
-        return max(chi / max(n - k, 1), 1.0)
-    # odd / even
-    odd = (np.mod(E, 2) == 1)
-    if odd.any() and (~odd).any():
-        def wm(sel):
-            ww = w[sel]
-            return np.sum(ww * r1[sel]) / np.sum(ww), 1 / np.sqrt(np.sum(ww))
-        mo, eo = wm(odd)
-        me, ee = wm(~odd)
-        _, _, _, chi_oe = wls(np.column_stack([np.ones_like(E), E, odd.astype(float)]))
-        dlt, edl = mo - me, np.hypot(eo, ee) * np.sqrt(_scale(chi_oe, 3))
-        ecosw = np.pi * dlt / (4.0 * P)            # binary at 2P: half-period offset
-        eecw = np.pi * edl / (4.0 * P)
-        out.update(odd_even_dt_min=float(dlt * 1440), odd_even_dt_err_min=float(edl * 1440),
-                   ecosw_2P=float(ecosw), ecosw_2P_err=float(eecw))
-        _log(log, f"  odd - even mid-times: {dlt * 1440:+.2f} +/- {edl * 1440:.2f} min "
-                  f"({dlt / edl:+.1f} sigma); if the true period is 2P "
-                  f"({2 * P:.4f} d) this gives e cos(w) = {ecosw:+.1e} +/- {eecw:.1e}")
-    # quadratic
-    if n >= 4:
-        A2 = np.column_stack([np.ones_like(E), E, E ** 2])
-        p2, c2, r2, chi2q = wls(A2)
-        q, eq = p2[2], np.sqrt(c2[2, 2] * max(chi2q / max(n - 3, 1), 1))
-        pdot = 2 * q / P                          # dP/dt [d/d]
-        dchi2_q = (chi1 - chi2q) / _scale(chi2q, 3)
-        out.update(dPdE_d=float(2 * q), dPdE_err_d=float(2 * eq),
-                   Pdot=float(pdot), dchi2_quad=float(dchi2_q))
-        _log(log, f"  quadratic ephemeris: dP/dE = {2 * q * 86400:+.3f} +/- "
-                  f"{2 * eq * 86400:.3f} s per cycle ({q / eq:+.1f} sigma); "
-                  f"delta chi2 vs linear = {dchi2_q:.1f}")
-    # light-travel time effect
-    span = float(t.max() - t.min())
-    if n >= 6 and span > 0:
-        Pg = np.exp(np.linspace(np.log(3.0 * P), np.log(3.0 * span), 400))
-        best = None
-        lims = []
-        for Po in Pg:
-            ph = 2 * np.pi * (t - t.min()) / Po
-            A3 = np.column_stack([np.ones_like(E), E, np.sin(ph), np.cos(ph)])
-            p3, c3, r3, chi3 = wls(A3)
-            K = float(np.hypot(p3[2], p3[3]))
-            sK = float(np.sqrt(0.5 * (c3[2, 2] + c3[3, 3])
-                               * max(chi3 / max(n - 4, 1), 1)))
-            lims.append((Po, K + 3 * sK))
-            if best is None or chi3 < best[1]:
-                best = (Po, chi3, K, sK)
-        lims = np.array(lims)
-        inside = lims[:, 0] <= span
-        lim_in = float(np.median(lims[inside, 1])) if inside.any() else np.nan
-        c_au_per_day = 173.1446
-        dchi2_l = (chi1 - best[1]) / _scale(best[1], 4)
-        out.update(ltte_best_P=float(best[0]), ltte_best_K_min=float(best[2] * 1440),
-                   ltte_dchi2=float(dchi2_l),
-                   ltte_lim3_min=float(lim_in * 1440),
-                   ltte_lim3_au=float(lim_in * c_au_per_day))
+                  f"the chi2_red of its own model"
+                  + _x("chi2_red", "chi2_red = {:.2f}"))
+    if "odd_even_dt_min" in out:
+        ecosw, eecw = out["ecosw_2P"], out["ecosw_2P_err"]
+        _log(log, f"  odd - even mid-times: {out['odd_even_dt_min']:+.2f} +/- "
+                  f"{out['odd_even_dt_err_min']:.2f} min "
+                  f"({out['_oe_sigma']:+.1f} sigma); if the true period is 2P "
+                  f"({2 * P:.4f} d) this gives e cos(w) = {ecosw:+.1e} +/- {eecw:.1e}"
+                  + _x("_oe_sigma", "{:+.1f} sigma"))
+    if "dPdE_d" in out:
+        _log(log, f"  quadratic ephemeris: dP/dE = {out['dPdE_d'] * 86400:+.3f} +/- "
+                  f"{out['dPdE_err_d'] * 86400:.3f} s per cycle "
+                  f"({out['_q_sigma']:+.1f} sigma); "
+                  f"delta chi2 vs linear = {out['dchi2_quad']:.1f}"
+                  + _x("dchi2_quad", "delta chi2 = {:.1f}"))
+    if "ltte_dchi2" in out:
+        span = out["_span"]
         _log(log, f"  light-travel-time search (outer period {3 * P:.0f}-"
-                  f"{3 * span:.0f} d): best P_out = {best[0]:.0f} d, amplitude "
-                  f"{best[2] * 1440:.1f} +/- {best[3] * 1440:.1f} min, delta chi2 = "
-                  f"{dchi2_l:.1f} (4 extra parameters: not significant "
-                  f"below ~15)")
-        if np.isfinite(lim_in):
+                  f"{3 * span:.0f} d): best P_out = {out['ltte_best_P']:.0f} d, amplitude "
+                  f"{out['ltte_best_K_min']:.1f} +/- {out['_ltte_K_err_min']:.1f} min, "
+                  f"delta chi2 = {out['ltte_dchi2']:.1f} (4 extra parameters: not "
+                  f"significant below ~15)" + _x("ltte_dchi2", "delta chi2 = {:.1f}"))
+        if np.isfinite(out["ltte_lim3_min"]):
             _log(log, f"  3-sigma limit on an LTTE amplitude for P_out <= "
-                      f"{span:.0f} d (median over periods): {lim_in * 1440:.1f} "
-                      f"min, i.e. a12 sin(i) < {lim_in * c_au_per_day:.2f} AU")
+                      f"{span:.0f} d (median over periods): {out['ltte_lim3_min']:.1f} "
+                      f"min, i.e. a12 sin(i) < {out['ltte_lim3_au']:.2f} AU"
+                      + _x("ltte_lim3_min", "{:.1f} min"))
     # depth trend
     md = np.isfinite(dt["depth"]) & np.isfinite(dt["e_depth"]) & (dt["e_depth"] > 0)
     if md.sum() >= 4:
@@ -4109,7 +4179,8 @@ def etv_analysis(dt, P, T0, cfg: "Config", tic: int, log=None):
     except Exception as exc:
         _log(log, f"  ! ETV plot failed: {exc}")
     _summary(cfg)["etv"] = {k: v for k, v in out.items()
-                            if isinstance(v, (int, float))}
+                            if not k.startswith("_")
+                            and (isinstance(v, (int, float)) or k == "flagged_epochs")}
     return out
 
 
