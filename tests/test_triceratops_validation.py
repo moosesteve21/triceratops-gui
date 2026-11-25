@@ -587,6 +587,43 @@ def test_ld_depth_kept_when_b_unconstrained():
     assert tv.ld_depth_keep_reason(ok, 210e-6, diag, cfg) == ""
 
 
+def test_fold_centre_depth():
+    import triceratops_validation as tv
+    from types import SimpleNamespace
+    dur = 0.05
+    ph = np.linspace(-0.1, 0.1, 401)
+    rng = np.random.default_rng(3)
+    fl = 1.0 + rng.normal(0, 20e-6, ph.size)
+    fl[np.abs(ph) < 0.5 * dur] -= 300e-6
+    d, e = tv.fold_centre_depth(SimpleNamespace(time=ph, flux=fl), dur)
+    assert abs(d - 300e-6) < 10e-6 and 0 < e < 10e-6
+    d, e = tv.fold_centre_depth(SimpleNamespace(time=ph[:5], flux=fl[:5]), dur)
+    assert np.isnan(d) and np.isnan(e)
+
+
+def test_per_transit_depth_falls_back_to_fold_for_weak_transits():
+    import triceratops_validation as tv
+    from types import SimpleNamespace
+    cfg = SimpleNamespace(per_transit_min_snr=3.0)
+    weak = np.full(300, 1.1)
+    strong = np.full(20, 8.0)
+    # weak transits, mean ~40 % deeper than the fold: replaced
+    why = tv.per_transit_depth_fallback_reason(427e-6, weak, 298e-6, 8e-6, cfg)
+    assert "median S/N 1.1" in why and "298" in why
+    # strong transits: a shallower fold may be smeared; keep the mean
+    assert tv.per_transit_depth_fallback_reason(427e-6, strong, 298e-6, 8e-6, cfg) == ""
+    # weak but consistent with the fold (< 30 %): keep
+    assert tv.per_transit_depth_fallback_reason(320e-6, weak, 298e-6, 8e-6, cfg) == ""
+    # weak, different by > 30 % but within 3 sigma of a noisy fold: keep
+    assert tv.per_transit_depth_fallback_reason(427e-6, weak, 298e-6, 60e-6, cfg) == ""
+    # mean shallower than the fold: not the free-mid-time bias; keep
+    assert tv.per_transit_depth_fallback_reason(200e-6, weak, 298e-6, 8e-6, cfg) == ""
+    # no fold depth: keep
+    assert tv.per_transit_depth_fallback_reason(427e-6, weak, np.nan, np.nan, cfg) == ""
+    assert tv.depth_disagrees_with_fold(427e-6, 298e-6, 8e-6)
+    assert not tv.depth_disagrees_with_fold(427e-6, 298e-6, 60e-6)
+
+
 def test_in_dir_restores_cwd(tmp_path):
     import os
     import triceratops_validation as tv

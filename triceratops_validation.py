@@ -5415,6 +5415,68 @@ def ld_depth_keep_reason(ld_fit, depth, diag, cfg) -> str:
     return ""
 
 
+def fold_centre_depth(lc, dur) -> tuple:
+    """Depth seen in the binned fold: median of the bins in the central half
+    of the transit below the median out of transit (|phase| > 0.75 T14), and
+    its error.  (nan, nan) when it cannot be measured.
+
+    The median of the central bins, not the mean of the lowest ones, which
+    was biased deep by noise with short bins (L 279-94, 5-min bins)."""
+    try:
+        ph = np.asarray(getattr(lc.time, "value", lc.time), float)
+        fl = np.asarray(getattr(lc.flux, "value", lc.flux), float)
+        inn = (np.abs(ph) < 0.25 * dur) & np.isfinite(fl)
+        out = (np.abs(ph) > 0.75 * dur) & np.isfinite(fl)
+        if not inn.any() or not out.any():
+            return float("nan"), float("nan")
+        d = float(np.nanmedian(fl[out]) - np.nanmedian(fl[inn]))
+        e = float(1.25 * 1.4826 * np.nanmedian(np.abs(
+            fl[out] - np.nanmedian(fl[out]))) / np.sqrt(max(inn.sum(), 1)))
+        return d, e
+    except Exception:
+        return float("nan"), float("nan")
+
+
+def depth_disagrees_with_fold(depth, d_fold, e_fold) -> bool:
+    """True when a depth differs from the fold depth by more than 30 % and
+    (when the fold error is known) by more than 3 sigma."""
+    if not (np.isfinite(d_fold) and d_fold > 0 and np.isfinite(depth)):
+        return False
+    diff = abs(depth - d_fold)
+    return diff > 0.3 * max(depth, d_fold) and \
+        (not np.isfinite(e_fold) or diff > 3 * e_fold)
+
+
+def per_transit_depth_fallback_reason(depth_pt, snr, d_fold, e_fold,
+                                      cfg) -> str:
+    """Why the per-transit mean depth should be replaced by the fold depth,
+    or '' when it may stand.
+
+    With the mid-time free in each per-transit fit, a transit at S/N ~ 1
+    is fitted where the noise dips deepest, so the weighted mean of many
+    weak transits comes out too deep (a short-period KESTREL candidate with
+    hundreds of transits at median S/N ~ 1: the mean was ~40 % deeper than
+    the fold, and the audit flagged it).  The fold has no such
+    freedom.  Replaced only when the transits are weak (median S/N below
+    per_transit_min_snr), the mean is deeper than the fold and the two
+    disagree (depth_disagrees_with_fold); at high S/N a shallower fold can
+    mean a smeared fold (timing variations), and the per-transit mean is
+    then the better value."""
+    snr = np.asarray(snr, float)
+    snr = snr[np.isfinite(snr)]
+    if not snr.size or not np.isfinite(depth_pt):
+        return ""
+    med = float(np.median(snr))
+    smin = float(getattr(cfg, "per_transit_min_snr", 3.0))
+    if med >= smin or depth_pt <= d_fold or \
+            not depth_disagrees_with_fold(depth_pt, d_fold, e_fold):
+        return ""
+    return (f"per-transit mean {depth_pt * 1e6:.0f} ppm is deeper than the "
+            f"fold ({d_fold * 1e6:.0f} +/- {e_fold * 1e6:.0f} ppm) and the "
+            f"transits are weak (median S/N {med:.1f} < {smin:g}; with free "
+            f"mid-times weak transits are fitted on noise dips)")
+
+
 def fit_limb_darkened_lc(tp, lc, P, dur, depth, star, sectors_data,
                          cfg: Config, log=None):
     """Fit the limb-darkened model to the binned folded LC and log the result.
@@ -8904,8 +8966,10 @@ def main(cfg: Config):
     # return ~0 with underestimated errors (chi2_red >> 1); using that
     # mean would understate the depth relative to the stacked fold.
     chi2r = diag.get("chi2_red", np.nan)
+    depth_from_pt = False
     if "depth" in diag and np.isfinite(chi2r) and chi2r < 5.0:
         depth = diag["depth"]
+        depth_from_pt = True
         _log(log, f"  adopted depth = weighted per-transit mean "
                   f"({depth * 1e6:.0f} ppm, chi2_red = {chi2r:.2f})")
     else:
@@ -9054,6 +9118,7 @@ def main(cfg: Config):
                     _log(log, f"\n  updating adopted depth from LD fit: "
                               f"{depth * 1e6:.0f} -> {d_ld * 1e6:.0f} ppm")
                     depth = d_ld
+                    depth_from_pt = False
                 t14_ld = float(ld_fit.get("T14_h", float("nan"))) / 24.0
                 if np.isfinite(t14_ld) and t14_ld > 0:
                     _log(log, f"  updating adopted T14 from LD fit: "
@@ -9066,6 +9131,22 @@ def main(cfg: Config):
         except Exception as exc:
             _log(log, f"\n  ! limb-darkened fit failed ({exc}); "
                       f"the trapezoid is used as reference model")
+    # The per-transit mean of many weak transits is biased deep (free
+    # mid-times); when it is still the adopted depth, check it on the fold.
+    if depth_from_pt and dt.size:
+        d_fold, e_fold = fold_centre_depth(lc, dur)
+        fb_why = per_transit_depth_fallback_reason(depth, dt["snr"], d_fold,
+                                                   e_fold, cfg)
+        if fb_why:
+            _log(log, f"  ! adopted depth replaced by the fold depth: "
+                      f"{depth * 1e6:.0f} -> {d_fold * 1e6:.0f} ppm ({fb_why})")
+            _summary(cfg).update(
+                depth_ppm_per_transit_mean=float(depth * 1e6),
+                depth_fallback_to_fold=fb_why)
+            depth = d_fold
+            _summary(cfg).update(depth_ppm_adopted=float(depth * 1e6))
+            _log(log, f"  adopted for TRICERATOPS: depth = {depth * 1e6:.0f} "
+                      f"ppm, T14 = {dur * 24:.2f} h")
     sigma_tri, sig_info = triceratops_flux_error(
         tp, fp, lc, max(dur, dur_fold), P_orb, cfg,
         ref_model=None if ld_fit is None else ld_fit["model"],
@@ -9129,22 +9210,8 @@ def main(cfg: Config):
           else effective_exposure_d(sectors_data, cfg.bin_minutes))
     cfg._tri_exptime = float(et) if et and et > 0 else None
     if cfg.use_known_ephemeris and cfg.depth_known > 0:
-        try:
-            # median of the bins in the central half of the transit (the
-            # mean of the 3 lowest bins was biased deep by noise when the
-            # bins are short: L 279-94 with 5-min bins)
-            _ph = np.asarray(getattr(lc.time, "value", lc.time), float)
-            _fl = np.asarray(lc.flux.value, float)
-            _in = (np.abs(_ph) < 0.25 * dur) & np.isfinite(_fl)
-            _out = (np.abs(_ph) > 0.75 * dur) & np.isfinite(_fl)
-            d_fold = float(np.nanmedian(_fl[_out]) - np.nanmedian(_fl[_in]))
-            e_fold = float(1.25 * 1.4826 * np.nanmedian(np.abs(
-                _fl[_out] - np.nanmedian(_fl[_out]))) / np.sqrt(max(_in.sum(), 1)))
-        except Exception:
-            d_fold = e_fold = float("nan")
-        if np.isfinite(d_fold) and d_fold > 0 and \
-                abs(depth - d_fold) > 0.3 * max(depth, d_fold) and \
-                (not np.isfinite(e_fold) or abs(depth - d_fold) > 3 * e_fold):
+        d_fold, e_fold = fold_centre_depth(lc, dur)
+        if depth_disagrees_with_fold(depth, d_fold, e_fold):
             _log(log, f"  ! depth passed to TRICERATOPS ({depth * 1e6:.0f} ppm) "
                       f"differs from the depth seen in this light curve "
                       f"(~{d_fold * 1e6:.0f} ppm in the centre of the binned "

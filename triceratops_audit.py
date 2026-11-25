@@ -293,6 +293,11 @@ def evaluate(run: Run, A: Audit):
         v = run.S(key)
         if v is not None:
             A.claim(lab, _f(v), unit, kind, f"{sj}:{key}")
+    if run.S("depth_fallback_to_fold"):
+        A.claim("per-transit mean depth (not adopted)",
+                f"{_f(run.S('depth_ppm_per_transit_mean'))} ppm; fold depth used: "
+                f"{run.S('depth_fallback_to_fold')}", kind="derived",
+                source=f"{sj}:depth_fallback_to_fold")
     if run.S("ld_fit"):
         L = run.S("ld_fit")
         A.claim("LD fit Rp/R*, b, grazing, T14",
