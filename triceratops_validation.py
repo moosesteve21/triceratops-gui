@@ -714,6 +714,14 @@ class Config:
     di_mc: int = 300                  # Monte Carlo draws for the centroid error
     di_sigma: float = 3.0             # exclusion threshold for neighbours
     di_min_snr: float = 3.0           # min SNR of the difference image to trust it
+    # The DI S/N above is the fitted PRF peak over the median pixel error,
+    # with position and width free: pure noise gives S/N >= 3 in most trials
+    # (median ~4).  So a sector's centroid is used only if, in addition,
+    # the transit is detected in that sector's own light curve (box depth
+    # S/N >= di_min_lc_snr) and the fit is not pinned at the cut-out edge
+    # (closer than di_edge_px to the boundary: a fit run off on noise).
+    di_min_lc_snr: float = 3.0
+    di_edge_px: float = 1.0
     # Systematic floor added in quadrature to the difference-image centroid
     # error (Gaussian approximation of the TESS PRF, pointing): without it a
     # 0.007 px statistical error turns a 1-2" PRF-model offset into 5-13 sigma.
@@ -4998,6 +5006,55 @@ def build_difference_image(sd: SectorData, P, T0, dur, cfg: Config):
                 n_epochs=n_used, per_epoch=diffs)
 
 
+def sector_transit_snr(time, flux, P, T0, dur) -> float:
+    """Box-depth S/N of the transit in one sector's light curve: median out
+    of transit (0.75-2.5 T14 from mid-transit) minus the mean of the central
+    in-transit points (|phase| < 0.35 T14), over 1.25 x the out-of-transit
+    scatter / sqrt(n_in) - the window of the audit's per-sector depths.
+    nan with fewer than 3 in-transit or 10 out-of-transit points."""
+    t = np.asarray(time, float)
+    f = np.asarray(flux, float)
+    ok = np.isfinite(t) & np.isfinite(f)
+    t, f = t[ok], f[ok]
+    if not (np.isfinite(P) and P > 0 and dur > 0) or t.size == 0:
+        return float("nan")
+    ph = (t - T0 + 0.5 * P) % P - 0.5 * P
+    inn = np.abs(ph) < 0.35 * dur
+    oot = (np.abs(ph) > 0.75 * dur) & (np.abs(ph) < 2.5 * dur)
+    if inn.sum() < 3 or oot.sum() < 10:
+        return float("nan")
+    e = 1.25 * np.std(f[oot]) / np.sqrt(inn.sum())
+    if not (np.isfinite(e) and e > 0):
+        return float("nan")
+    return float((np.median(f[oot]) - np.mean(f[inn])) / e)
+
+
+def di_edge_distance(x, y, col0, row0, shape) -> float:
+    """Distance (px) of a fitted position from the boundary of the cut-out
+    (pixel edges at col0 - 0.5 ... col0 + nx - 0.5); negative outside."""
+    ny, nx = int(shape[0]), int(shape[1])
+    return float(min(x - (col0 - 0.5), (col0 + nx - 0.5) - x,
+                     y - (row0 - 0.5), (row0 + ny - 0.5) - y))
+
+
+def di_sector_reject_reason(fit_snr, sig_pix, edge_px, lc_snr, cfg) -> str:
+    """Why a sector's difference-image centroid must not be used to clear
+    or keep nearby stars, or '' when it may."""
+    if not (np.isfinite(sig_pix) and sig_pix > 0):
+        return "no centroid error"
+    if not (np.isfinite(fit_snr) and fit_snr >= cfg.di_min_snr):
+        return f"difference-image S/N {fit_snr:.1f} < {cfg.di_min_snr:g}"
+    emin = float(getattr(cfg, "di_edge_px", 1.0))
+    if np.isfinite(edge_px) and edge_px < emin:
+        return (f"fit pinned at the cut-out edge ({edge_px:.2f} px from the "
+                f"boundary < {emin:g})")
+    smin = float(getattr(cfg, "di_min_lc_snr", 3.0))
+    if not (np.isfinite(lc_snr) and lc_snr >= smin):
+        return (f"transit not detected in this sector's light curve "
+                f"(box-depth S/N {lc_snr:.1f} < {smin:g})")
+    return ""
+
+
 def difference_image_analysis(sectors_data, stars, P, T0, dur, cfg: Config,
                               tic: int):
     """Localise the transit source with difference imaging.
@@ -5079,6 +5136,16 @@ def difference_image_analysis(sectors_data, stars, P, T0, dur, cfg: Config,
 
         scale = float(np.abs(sd.wcs.proj_plane_pixel_scales()[0]
                              .to(u.arcsec).value))
+        edge_px = di_edge_distance(fit_diff["x"], fit_diff["y"],
+                                   sd.col0, sd.row0, di["diff"].shape)
+        _lc_f = sd.norm_flux if sd.norm_flux is not None else sd.flux
+        lc_snr = sector_transit_snr(sd.time, _lc_f, P, T0, dur)
+        reject = di_sector_reject_reason(fit_diff["snr"], sig_pix, edge_px,
+                                         lc_snr, cfg)
+        if reject and np.isfinite(fit_diff["snr"]) and \
+                fit_diff["snr"] >= cfg.di_min_snr:
+            print(f"  ! sector {sd.sector}: difference-image centroid not "
+                  f"used: {reject}")
         summaries.append(dict(
             sector=sd.sector, n_epochs=di["n_epochs"],
             snr=fit_diff["snr"],
@@ -5092,12 +5159,12 @@ def difference_image_analysis(sectors_data, stars, P, T0, dur, cfg: Config,
             offset_direct_arcsec=sep_dir * scale,
             offset_direct_sigma=sep_dir / sig_pix
             if np.isfinite(sig_pix) and sig_pix > 0 else np.nan,
+            edge_px=edge_px, lc_snr=lc_snr, used=not reject,
+            not_used_reason=reject,
         ))
 
         # --- which stars are consistent with the centroid? ---
-        trustworthy = (np.isfinite(sig_pix) and sig_pix > 0
-                       and np.isfinite(fit_diff["snr"])
-                       and fit_diff["snr"] >= cfg.di_min_snr)
+        trustworthy = not reject
         if trustworthy:
             xs_star, ys_star = sd.wcs.world_to_pixel(
                 SkyCoord(stars["ra"].values * u.deg,
@@ -9251,14 +9318,19 @@ def main(cfg: Config):
             col = ("offset_direct_sigma" if "offset_direct_sigma" in di_summary
                    and di_summary["offset_direct_sigma"].notna().any()
                    else "offset_cat_sigma")
-            good = di_summary["snr"] >= cfg.di_min_snr
+            good = (di_summary["used"].astype(bool) if "used" in di_summary
+                    else di_summary["snr"] >= cfg.di_min_snr)
+            for _, r_ in di_summary[~good].iterrows():
+                _log(log, f"  sector {int(r_['sector'])} not used: "
+                          f"{r_.get('not_used_reason', '')}")
             on_target = di_summary.loc[good, col].dropna()
             if len(on_target):
                 med = float(on_target.median())
                 _log(log, f"  difference-image centroid vs target "
                           f"({'direct-image PRF' if col.startswith('offset_direct') else 'catalogue position'}): "
                           f"median {med:.1f} sigma over {len(on_target)} "
-                          f"sectors with S/N >= {cfg.di_min_snr:g}; "
+                          f"usable sectors (S/N >= {cfg.di_min_snr:g}, transit "
+                          f"seen in the sector, fit not at the edge); "
                           f"{'consistent with' if med < 3 else 'OFFSET from'} "
                           f"the target")
                 _summary(cfg)["di_offset_sigma_median"] = med

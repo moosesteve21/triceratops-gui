@@ -624,6 +624,43 @@ def test_per_transit_depth_falls_back_to_fold_for_weak_transits():
     assert not tv.depth_disagrees_with_fold(427e-6, 298e-6, 60e-6)
 
 
+def test_sector_transit_snr():
+    import triceratops_validation as tv
+    rng = np.random.default_rng(5)
+    P, T0, dur = 2.0, 0.3, 0.1
+    t = np.arange(0, 27, 2 / 1440)
+    noise = rng.normal(0, 500e-6, t.size)
+    ph = (t - T0 + 0.5 * P) % P - 0.5 * P
+    f = 1.0 + noise - np.where(np.abs(ph) < 0.5 * dur, 1000e-6, 0.0)
+    assert tv.sector_transit_snr(t, f, P, T0, dur) > 10
+    # no transit in this sector: S/N near 0
+    assert abs(tv.sector_transit_snr(t, 1.0 + noise, P, T0, dur)) < 3
+    # no in-transit data
+    assert np.isnan(tv.sector_transit_snr(t[np.abs(ph) > dur],
+                                          f[np.abs(ph) > dur], P, T0, dur))
+
+
+def test_di_edge_distance_and_sector_rejection():
+    import triceratops_validation as tv
+    from types import SimpleNamespace
+    cfg = SimpleNamespace(di_min_snr=3.0, di_edge_px=1.0, di_min_lc_snr=3.0)
+    # 10x10 cut-out whose pixel 0 is CCD column 434, row 143 (pixel edges
+    # 433.5 ... 443.5): a fit at column 434.42 is 0.92 px from the edge
+    assert abs(tv.di_edge_distance(434.42, 146.9, 434, 143, (10, 10)) - 0.92) < 1e-9
+    assert abs(tv.di_edge_distance(4.5, 4.5, 0, 0, (10, 10)) - 5.0) < 1e-9
+    assert tv.di_edge_distance(-0.11, 9.5, 0, 0, (10, 10)) == 0.0
+    # usable sector
+    assert tv.di_sector_reject_reason(24.0, 0.18, 4.7, 6.5, cfg) == ""
+    # A: fit pinned at the edge, whatever its S/N
+    assert "edge" in tv.di_sector_reject_reason(30.4, 2.4, 0.0, 4.8, cfg)
+    # B: transit not seen in the sector's own light curve (S/N 8.6 is noise)
+    assert "not detected" in tv.di_sector_reject_reason(8.6, 1.0, 4.0, -1.2, cfg)
+    assert "not detected" in tv.di_sector_reject_reason(8.6, 1.0, 4.0, np.nan, cfg)
+    # the old criteria still apply
+    assert "S/N" in tv.di_sector_reject_reason(2.0, 0.5, 4.0, 6.0, cfg)
+    assert "error" in tv.di_sector_reject_reason(9.0, np.nan, 4.0, 6.0, cfg)
+
+
 def test_in_dir_restores_cwd(tmp_path):
     import os
     import triceratops_validation as tv

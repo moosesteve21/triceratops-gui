@@ -690,13 +690,18 @@ def skeptic(run: Run, A: Audit, T: dict):
         vals = []
         for r in run.di:
             try:
-                if float(r.get("snr", "nan")) >= T["di_min_snr"]:
+                # v4.3+: the pipeline marks the sectors whose centroid it used
+                # (S/N, transit seen in the sector, fit not at the edge)
+                used = r.get("used")
+                ok = (str(used).strip().lower() == "true" if used not in (None, "")
+                      else float(r.get("snr", "nan")) >= T["di_min_snr"])
+                if ok:
                     vals.append((int(float(r["sector"])), float(r[key])))
             except (ValueError, KeyError):
                 pass
         if not vals:
             A.test("Centroids", "Is the dip on the target?", "NA",
-                   "no sector with difference-image S/N >= 3", f"difference_imaging_{run.tic}.csv")
+                   "no usable difference-image sector (S/N >= 3, transit seen in the sector, fit not at the cut-out edge)", f"difference_imaging_{run.tic}.csv")
         else:
             med = float(np.median([v for _, v in vals]))
             hi = [f"s{s}: {v:.1f}" for s, v in vals if v > T["di_sector_warn_sigma"]]
